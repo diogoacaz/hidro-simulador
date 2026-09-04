@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Simulador de Reservatório UHE</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header>
+    <h1>Simulador de Reservatório de UHE</h1>
+    <p class="subtitulo">Balanço hídrico, geração de energia e histórico de simulações</p>
+    <p id="firebase-status" class="aviso" hidden></p>
+  </header>
+
+  <main>
+    <section class="painel" id="painel-reservatorio">
+      <h2>1. Configuração do reservatório</h2>
+      <div class="linha">
+        <label>Reservatório salvo
+          <select id="select-reservatorio">
+            <option value="">— novo / não salvo —</option>
+          </select>
+        </label>
+        <button type="button" id="btn-atualizar-reservatorios">Atualizar lista</button>
+      </div>
+
+      <form id="form-reservatorio" class="grid-form">
+        <label>Nome da usina
+          <input type="text" id="nome" value="Usina Exemplo" required />
+        </label>
+        <label>Volume mínimo (hm³)
+          <input type="number" id="volMin" value="300" step="any" required />
+        </label>
+        <label>Volume máximo (hm³)
+          <input type="number" id="volMax" value="800" step="any" required />
+        </label>
+        <label>Volume inicial (hm³)
+          <input type="number" id="volInicial" value="550" step="any" required />
+        </label>
+        <label>Cota no volume mínimo (m)
+          <input type="number" id="cotaMin" value="380" step="any" required />
+        </label>
+        <label>Cota no volume máximo (m)
+          <input type="number" id="cotaMax" value="400" step="any" required />
+        </label>
+        <label>Cota de jusante (m)
+          <input type="number" id="cotaJusante" value="340" step="any" required />
+        </label>
+        <label>Perdas de carga (m)
+          <input type="number" id="perdas" value="1" step="any" required />
+        </label>
+        <label>Engolimento máximo (m³/s)
+          <input type="number" id="engolimentoMaximo" value="120" step="any" required />
+        </label>
+        <label>Potência instalada (MW)
+          <input type="number" id="potenciaInstalada" value="45" step="any" required />
+        </label>
+        <label>Rendimento global (0–1)
+          <input type="number" id="rendimento" value="0.90" min="0" max="1" step="0.01" required />
+        </label>
+        <label>Vazão turbinada alvo (m³/s)
+          <input type="number" id="vazaoTurbinadaAlvo" value="120" step="any" required />
+          <small>Padrão = engolimento máximo (turbinar o máximo possível)</small>
+        </label>
+      </form>
+      <div class="acoes">
+        <button type="button" id="btn-salvar-reservatorio">Salvar reservatório</button>
+        <span id="erros-reservatorio" class="erro"></span>
+      </div>
+    </section>
+
+    <section class="painel" id="painel-afluencia">
+      <h2>2. Série de afluências (vazão, m³/s)</h2>
+      <div class="linha">
+        <label>Dias
+          <input type="number" id="dias-aleatorio" value="90" min="1" max="3650" />
+        </label>
+        <label>Vazão base (m³/s)
+          <input type="number" id="base-aleatorio" value="150" min="0" step="any" />
+        </label>
+        <label>Variação (%)
+          <input type="number" id="variacao-aleatoria" value="25" min="0" max="100" step="any" />
+        </label>
+        <button type="button" id="btn-gerar-serie">Gerar série aleatória</button>
+        <label class="upload-csv">Carregar CSV
+          <input type="file" id="input-csv" accept=".csv,text/csv" />
+        </label>
+      </div>
+      <textarea id="serie-afluencia" rows="6" placeholder="Uma vazão (m³/s) por linha, ou separadas por vírgula/espaço"></textarea>
+    </section>
+
+    <div class="acoes acoes-principais">
+      <button type="button" id="btn-simular" class="primario">Rodar simulação</button>
+      <button type="button" id="btn-salvar-simulacao" disabled>Salvar simulação no Firebase</button>
+      <label>Simulações salvas
+        <select id="select-simulacao">
+          <option value="">— carregar simulação salva —</option>
+        </select>
+      </label>
+    </div>
+
+    <section class="painel" id="painel-resultados" hidden>
+      <h2>3. Resultados</h2>
+      <div id="resumo" class="resumo-grid"></div>
+
+      <div class="graficos">
+        <canvas id="grafico-volume" height="220"></canvas>
+        <canvas id="grafico-vazoes" height="220"></canvas>
+        <canvas id="grafico-potencia" height="220"></canvas>
+      </div>
+
+      <details>
+        <summary>Ver tabela diária</summary>
+        <div class="tabela-scroll">
+          <table id="tabela-resultados">
+            <thead>
+              <tr>
+                <th>Dia</th><th>Afluente</th><th>Turbinada</th><th>Vertida</th>
+                <th>Déficit</th><th>Volume (hm³)</th><th>Cota (m)</th><th>Potência (MW)</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </details>
+    </section>
+  </main>
+
+  <footer>
+    <p>Modelo simplificado: curva cota-volume linear e nível de jusante fixo. Ajuste os parâmetros conforme os dados reais da usina.</p>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

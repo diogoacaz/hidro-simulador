@@ -1,0 +1,17 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Sem autenticação neste MVP: leitura e escrita liberadas para as duas
+    // coleções usadas pelo app. Restrinja isso (ex.: exigir Firebase Auth)
+    // antes de usar em produção com dados sensíveis.
+    match /reservatorios/{id} {
+      allow read, write: if true;
+    }
+    match /simulacoes/{id} {
+      allow read, write: if true;
+    }
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
