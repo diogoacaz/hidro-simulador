@@ -5,10 +5,10 @@
 // O firebaseConfig de apps web NÃO é secreto (fica visível no navegador) — a segurança
 // vem das regras do Firestore (veja firestore.rules), não do sigilo destas chaves.
 export const firebaseConfig = {
-  apiKey: 'COLE_AQUI_SUA_API_KEY',
-  authDomain: 'SEU_PROJETO.firebaseapp.com',
-  projectId: 'SEU_PROJETO',
-  storageBucket: 'SEU_PROJETO.appspot.com',
-  messagingSenderId: '000000000000',
-  appId: '1:000000000000:web:xxxxxxxxxxxxxxxx',
+  apiKey: 'AIzaSyDjU-zKtgWZyw3wTWPOt967Hpx-AvlkCt0',
+  authDomain: 'hidro-simulador.firebaseapp.com',
+  projectId: 'hidro-simulador',
+  storageBucket: 'hidro-simulador.firebasestorage.app',
+  messagingSenderId: '445903392564',
+  appId: '1:445903392564:web:3970663c68127dc3a71f61',
 };
