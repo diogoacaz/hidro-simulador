@@ -54,12 +54,23 @@ function formatarLocal(data) {
 }
 
 // Divide texto colado (CSV, TSV ou colunas de planilha) em matriz de células.
+// A tabulação e o ponto-e-vírgula têm prioridade sobre a vírgula: em pt-BR a
+// vírgula costuma ser o separador decimal ("403,00"), e usá-la como separador
+// de colunas quebraria cada número em duas células.
 export function textoParaMatriz(texto) {
-  return texto
+  const linhas = texto
     .split(/\r?\n/)
     .map((linha) => linha.trim())
-    .filter((linha) => linha.length)
-    .map((linha) => linha.split(/\t|;|,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map((c) => c.trim().replace(/^"|"$/g, '')));
+    .filter((linha) => linha.length);
+  if (!linhas.length) return [];
+
+  const amostra = linhas.slice(0, 5).join('\n');
+  const separador = amostra.includes('\t') ? /\t/
+    : amostra.includes(';') ? /;/
+    : /,(?=(?:[^"]*"[^"]*")*[^"]*$)/;
+
+  return linhas.map((linha) =>
+    linha.split(separador).map((c) => c.trim().replace(/^"|"$/g, '')));
 }
 
 // Descarta a primeira linha se ela parecer um cabeçalho (nenhuma célula numérica).
