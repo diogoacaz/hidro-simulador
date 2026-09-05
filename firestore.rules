@@ -1,17 +1,21 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Sem autenticação neste MVP: leitura e escrita liberadas para as duas
-    // coleções usadas pelo app. Restrinja isso (ex.: exigir Firebase Auth)
-    // antes de usar em produção com dados sensíveis.
-    match /reservatorios/{id} {
-      allow read, write: if true;
+    // MVP sem autenticação: leitura e escrita liberadas apenas nas coleções do app.
+    // Antes de uso em produção com dados sensíveis, restrinja com Firebase Auth
+    // (ex.: exigir request.auth != null para escrita e perfis de edição).
+    match /usinas/{id}        { allow read, write: if true; }
+    match /reservatorios/{id} { allow read, write: if true; }
+    match /cav/{id}           { allow read, write: if true; }
+    match /registros/{id}     { allow read, write: if true; }
+    match /simulacoes/{id}    { allow read, write: if true; }
+
+    // Auditoria é append-only: pode ser criada e lida, nunca alterada ou apagada.
+    match /auditoria/{id} {
+      allow read, create: if true;
+      allow update, delete: if false;
     }
-    match /simulacoes/{id} {
-      allow read, write: if true;
-    }
-    match /{document=**} {
-      allow read, write: if false;
-    }
+
+    match /{document=**} { allow read, write: if false; }
   }
 }
