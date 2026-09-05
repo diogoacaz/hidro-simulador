@@ -349,7 +349,7 @@ function blocoVazao(chave, rotulo) {
         </label>
       </div>
 
-      <div id="${chave}-constante-caixa">
+      <div id="${chave}-constante-caixa" class="grade">
         <label>Vazão (m³/s)
           <input type="number" id="${chave}-constante" step="0.01" min="0" value="0" />
         </label>
