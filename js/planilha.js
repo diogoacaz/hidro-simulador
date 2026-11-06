@@ -123,7 +123,7 @@ export function textoParaMatriz(texto) {
   return dividir(linhas, /,(?=(?:[^"]*"[^"]*")*[^"]*$)/);
 }
 
-const limpar = (c) => c.trim().replace(/^"|"$/g, '');
+const limpar = (c) => String(c ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').trim().replace(/^"|"$/g, '');
 const dividir = (linhas, sep) => linhas.map((l) => l.split(sep).map(limpar));
 
 // Sem tabulação nem ponto-e-vírgula, a vírgula é ambígua: separa valores em
@@ -162,8 +162,36 @@ export function removerCabecalho(matriz) {
 export async function lerArquivo(file) {
   const nome = file.name.toLowerCase();
   if (nome.endsWith('.xlsx') || nome.endsWith('.xls')) return lerXlsx(file);
-  const texto = await file.text();
-  return textoParaMatriz(texto);
+  return textoParaMatriz(decodificar(await file.arrayBuffer()));
+}
+
+/**
+ * Decide a codificação do arquivo em vez de assumir UTF-8.
+ *
+ * Exportação do Excel no Windows sai em UTF-16 ("Texto Unicode") ou em
+ * ANSI/CP1252 com a mesma frequência que em UTF-8. Lendo tudo como UTF-8, o
+ * UTF-16 falhava inteiro — cada caractere vinha seguido de um byte zero e
+ * nenhuma coluna era reconhecida como numérica — e o ANSI perdia os acentos.
+ */
+function decodificar(buffer) {
+  const bytes = new Uint8Array(buffer);
+  if (bytes[0] === 0xFF && bytes[1] === 0xFE) return new TextDecoder('utf-16le').decode(bytes.subarray(2));
+  if (bytes[0] === 0xFE && bytes[1] === 0xFF) return new TextDecoder('utf-16be').decode(bytes.subarray(2));
+  if (bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) return new TextDecoder('utf-8').decode(bytes.subarray(3));
+
+  // UTF-16 sem BOM: texto quase todo ASCII intercala um byte zero.
+  const amostra = bytes.subarray(0, 400);
+  const zeros = amostra.reduce((n, b) => n + (b === 0 ? 1 : 0), 0);
+  if (amostra.length > 8 && zeros > amostra.length * 0.25) {
+    return new TextDecoder(bytes[0] === 0 ? 'utf-16be' : 'utf-16le').decode(bytes);
+  }
+
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    // Bytes que não formam UTF-8 válido: quase sempre ANSI do Windows.
+    return new TextDecoder('windows-1252').decode(bytes);
+  }
 }
 
 async function lerXlsx(file) {
