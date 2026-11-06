@@ -502,17 +502,30 @@ tr.violacao-atencao td { background: color-mix(in srgb, var(--atencao) 7%, trans
 
 /* ---------- Gráficos ---------- */
 
-.graficos { display: flex; flex-direction: column; gap: 8px; }
+.graficos {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+/* Volume e vazões lado a lado; a CAV usa o mesmo par para volume e área,
+   já que dois eixos y num só plot inventam correlação. */
+.graficos-par {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+  gap: 10px 26px;
+}
 
 .grafico-caixa {
   position: relative;
-  height: 290px;
-  padding: 16px 4px 4px;
+  height: 300px;
+  padding: 20px 4px 4px;
   border-top: 1px solid var(--linha);
 }
 
-.grafico-caixa:first-child { border-top: none; }
-.grafico-caixa.alta { height: 350px; }
+.graficos > .grafico-caixa:first-child { border-top: none; padding-top: 4px; }
+.grafico-caixa.alta { height: 380px; }
 
 /* ---------- Diversos ---------- */
 
@@ -613,6 +626,171 @@ a { color: inherit; text-decoration: none; }
   .toast-erro, .toast-ok { color: var(--petroleo); }
 }
 
+/* ---------- Resultado da simulação ---------- */
+
+/* A manchete: a incógnita resolvida, na voz do template — numeral pesado
+   em petróleo sobre o lime. Vale nos dois temas, porque é exatamente o
+   painel claro do template. */
+.hero {
+  margin: 2px 0 16px;
+  padding: 24px 26px;
+  background: var(--lime);
+  color: var(--petroleo);
+  border-radius: var(--raio);
+}
+
+.hero-rotulo {
+  margin: 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.68;
+}
+
+.hero-valor {
+  margin: 8px 0 0;
+  font-size: clamp(2.3rem, 7vw, 3.5rem);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.035em;
+  font-variant-numeric: tabular-nums;
+}
+
+.hero-valor span {
+  font-size: 0.52em;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  opacity: 0.72;
+}
+
+.hero-apoio {
+  margin: 12px 0 0;
+  font-size: 0.82rem;
+  font-weight: 500;
+  opacity: 0.72;
+}
+
+/* Situação: o veredito e onde, no tempo, as violações caem. */
+.situacao {
+  margin-bottom: 16px;
+  padding: 15px 18px;
+  background: var(--sutil);
+  border-radius: var(--raio-p);
+  border-left: 3px solid var(--linha-forte);
+}
+
+.situacao-ok { border-left-color: var(--ok); }
+.situacao-atencao { border-left-color: var(--atencao); }
+.situacao-restricao { border-left-color: var(--restricao); }
+.situacao-critico { border-left-color: var(--critico); }
+
+.situacao-topo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.situacao-contagem {
+  font-size: 0.82rem;
+  color: var(--texto-medio);
+  font-variant-numeric: tabular-nums;
+}
+
+.situacao-tipos {
+  margin: 10px 0 0;
+  font-size: 0.82rem;
+  color: var(--texto-medio);
+}
+
+/* Linha do tempo das violações: trechos contíguos viram um segmento só,
+   então a barra não depende do número de passos. */
+.faixa-tempo {
+  display: flex;
+  height: 8px;
+  margin-top: 14px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--linha);
+}
+
+.faixa-trecho { display: block; min-width: 2px; }
+.faixa-ok { background: color-mix(in srgb, var(--ok) 32%, transparent); }
+.faixa-atencao { background: var(--atencao); }
+.faixa-restricao { background: var(--restricao); }
+.faixa-critico { background: var(--critico); }
+
+.faixa-legenda {
+  display: flex;
+  justify-content: space-between;
+  margin: 6px 0 0;
+  font-size: 0.69rem;
+  color: var(--texto-suave);
+}
+
+/* Números de apoio, agrupados por grandeza. */
+.metricas {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(228px, 1fr));
+  gap: 12px;
+  margin-bottom: 22px;
+}
+
+.metrica-grupo {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  padding: 16px 18px;
+  background: var(--sutil);
+  border-radius: 10px;
+}
+
+.metrica-grupo h3 {
+  margin: 0;
+  font-size: 0.67rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--texto-suave);
+}
+
+.metrica { display: flex; flex-direction: column; gap: 2px; }
+.metrica > span { font-size: 0.73rem; color: var(--texto-suave); line-height: 1.35; }
+
+.metrica > strong {
+  font-size: 0.98rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+.metrica-transicao > strong {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.transicao-de { color: var(--texto-medio); font-weight: 500; }
+.transicao-seta { color: var(--texto-suave); font-weight: 400; }
+
+/* Subir ou descer de nível não é bom nem ruim, então o delta não usa cor
+   de status: o sinal já carrega a direção. */
+.delta {
+  font-size: 0.76rem;
+  font-style: normal;
+  font-weight: 600;
+  color: var(--texto-medio);
+  font-variant-numeric: tabular-nums;
+}
+
+.serie-completa {
+  margin-top: 18px;
+  padding-top: 2px;
+  border-top: 1px solid var(--linha);
+}
+
 /* ---------- Responsivo ---------- */
 
 @media (max-width: 900px) {
@@ -634,7 +812,10 @@ a { color: inherit; text-decoration: none; }
   .tabela-scroll { margin: 0 -17px; padding: 0 17px; }
   .grade { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
   .grade-2 { grid-template-columns: 1fr; }
-  .grafico-caixa { height: 250px; }
-  .grafico-caixa.alta { height: 290px; }
+  .grafico-caixa { height: 255px; }
+  .grafico-caixa.alta { height: 300px; }
+  .graficos-par { grid-template-columns: 1fr; }
+  .hero { padding: 20px 18px; }
+  .metricas { grid-template-columns: 1fr; }
   .acoes button { flex: 1 1 auto; }
 }

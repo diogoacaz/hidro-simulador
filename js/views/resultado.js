@@ -1,5 +1,12 @@
 // Exibição do resultado de uma simulação — compartilhada entre a tela de
 // simulação e o detalhe do histórico.
+//
+// A leitura é hierárquica, não uma grade plana de doze cartões iguais:
+//   1. a incógnita resolvida, em tamanho de manchete;
+//   2. a situação — houve violação, de que tipo, e onde no tempo;
+//   3. os números de apoio, agrupados por grandeza;
+//   4. os gráficos;
+//   5. a série completa, recolhida.
 
 import { graficoNivel, graficoVolume, graficoVazoes, amostrar } from '../charts.js';
 import { baixarCsv, baixarCanvas } from '../planilha.js';
@@ -7,6 +14,12 @@ import { ROTULOS_MODO } from '../simulation.js';
 import { $, esc, num, dataHoraLocal, badgeSeveridade } from '../ui.js';
 
 const MAX_LINHAS_TABELA = 400;
+
+const NOMES_SEVERIDADE = {
+  critico: 'Violação emergencial',
+  restricao: 'Violação de restrição',
+  atencao: 'Fora da faixa operacional',
+};
 
 export function html() {
   return `
@@ -22,17 +35,20 @@ export function html() {
         </div>
       </div>
 
+      <div id="resultado-hero"></div>
+      <div id="resultado-situacao"></div>
       <div id="resultado-alertas"></div>
-      <div id="resultado-incognita"></div>
-      <div class="cartoes" id="resultado-cartoes"></div>
+      <div id="resultado-metricas"></div>
 
-      <div class="graficos" style="margin-top:22px">
+      <div class="graficos">
         <div class="grafico-caixa alta"><canvas id="grafico-nivel"></canvas></div>
-        <div class="grafico-caixa"><canvas id="grafico-volume"></canvas></div>
-        <div class="grafico-caixa"><canvas id="grafico-vazoes"></canvas></div>
+        <div class="graficos-par">
+          <div class="grafico-caixa"><canvas id="grafico-volume"></canvas></div>
+          <div class="grafico-caixa"><canvas id="grafico-vazoes"></canvas></div>
+        </div>
       </div>
 
-      <details style="margin-top:16px">
+      <details class="serie-completa">
         <summary>Ver série de 15 em 15 min</summary>
         <div id="resultado-tabela"></div>
       </details>
@@ -47,38 +63,13 @@ export function preencher(raiz, { resultado, reservatorio, limites, restricoes, 
   const { serie, incognita, resumo, alertas } = resultado;
 
   $('#resultado-contexto', raiz).textContent = contexto || '';
+  $('#resultado-hero', raiz).innerHTML = hero(incognita, resumo);
+  $('#resultado-situacao', raiz).innerHTML = situacao(serie, resumo);
+  $('#resultado-metricas', raiz).innerHTML = metricas(resumo);
 
   $('#resultado-alertas', raiz).innerHTML = (alertas || [])
     .map((a) => `<div class="alerta alerta-aviso">${esc(a)}</div>`)
     .join('');
-
-  $('#resultado-incognita', raiz).innerHTML = incognita
-    ? `<div class="cartoes" style="margin-bottom:12px">
-         <div class="cartao destaque">
-           <span>${esc(ROTULOS_MODO[incognita.variavel])} (incógnita)</span>
-           <strong>${esc(incognita.texto)}</strong>
-         </div>
-       </div>`
-    : '';
-
-  $('#resultado-cartoes', raiz).innerHTML = `
-    <div class="cartao"><span>Nível inicial</span><strong>${num(resumo.cotaInicial)} m</strong></div>
-    <div class="cartao"><span>Nível final</span><strong>${num(resumo.cotaFinal)} m</strong></div>
-    <div class="cartao"><span>Variação de nível</span><strong>${sinal(resumo.variacaoCota)} m</strong></div>
-    <div class="cartao"><span>Volume inicial</span><strong>${num(resumo.volumeInicial)} hm³</strong></div>
-    <div class="cartao"><span>Volume final</span><strong>${num(resumo.volumeFinal)} hm³</strong></div>
-    <div class="cartao"><span>Variação de volume</span><strong>${sinal(resumo.variacaoVolume)} hm³</strong></div>
-    <div class="cartao"><span>Duração</span><strong>${esc(resumo.duracaoTexto)}</strong></div>
-    <div class="cartao"><span>Q afluente média</span><strong>${num(resumo.qafMedia)} m³/s</strong></div>
-    <div class="cartao"><span>Q defluente média</span><strong>${num(resumo.qdefMedia)} m³/s</strong></div>
-    <div class="cartao"><span>Nível mín. / máx.</span><strong>${num(resumo.cotaMinima)} / ${num(resumo.cotaMaxima)} m</strong></div>
-    <div class="cartao"><span>Passos em violação</span><strong>${resumo.passosComViolacao} de ${resumo.passos + 1}</strong></div>
-    <div class="cartao"><span>Situação</span><strong>${badgeSeveridade(resumo.severidadeMaxima)}</strong></div>`;
-
-  if (resumo.tiposViolacao && resumo.tiposViolacao.length) {
-    $('#resultado-alertas', raiz).insertAdjacentHTML('beforeend',
-      `<div class="alerta alerta-aviso"><strong>Limites violados:</strong> ${esc(resumo.tiposViolacao.join(', '))}.</div>`);
-  }
 
   const restricoesVigentes = (restricoes || []).filter((r) => Number.isFinite(r.nivel));
   graficoNivel('grafico-nivel', serie, limites || {}, restricoesVigentes);
@@ -105,9 +96,143 @@ export function preencher(raiz, { resultado, reservatorio, limites, restricoes, 
   };
 }
 
+/* ------------------------------------------------------------------ *
+ * Blocos
+ * ------------------------------------------------------------------ */
+
+// A manchete: a incógnita que a simulação resolveu. Sem incógnita (modo de
+// previsão direta), o nível final é o que o operador foi buscar.
+function hero(incognita, resumo) {
+  const [rotulo, valor, apoio] = incognita
+    ? [
+      `${ROTULOS_MODO[incognita.variavel]} — incógnita`,
+      incognita.texto,
+      `${num(resumo.cotaInicial)} m no início · ${esc(resumo.duracaoTexto)} simuladas`,
+    ]
+    : [
+      'Nível final',
+      `${num(resumo.cotaFinal)} m`,
+      `${sinal(resumo.variacaoCota)} m em ${esc(resumo.duracaoTexto)}`,
+    ];
+
+  const [inteiro, decimal] = String(valor).split(/([,.]\d+.*)$/);
+  return `
+    <div class="hero">
+      <p class="hero-rotulo">${esc(rotulo)}</p>
+      <p class="hero-valor">${esc(inteiro)}<span>${esc(decimal || '')}</span></p>
+      <p class="hero-apoio">${apoio}</p>
+    </div>`;
+}
+
+// Situação: o veredito, mais onde no tempo as violações caem.
+function situacao(serie, resumo) {
+  const tipos = resumo.tiposViolacao && resumo.tiposViolacao.length
+    ? `<p class="situacao-tipos">Limites violados: <strong>${esc(resumo.tiposViolacao.join(', '))}</strong>.</p>`
+    : '';
+
+  const total = resumo.passos + 1;
+  const proporcao = total ? Math.round((resumo.passosComViolacao / total) * 100) : 0;
+  const contagem = resumo.passosComViolacao
+    ? `<span class="situacao-contagem">${resumo.passosComViolacao} de ${total} passos (${proporcao}%)</span>`
+    : `<span class="situacao-contagem">${total} passos dentro dos limites</span>`;
+
+  return `
+    <div class="situacao ${resumo.severidadeMaxima ? `situacao-${resumo.severidadeMaxima}` : 'situacao-ok'}">
+      <div class="situacao-topo">
+        ${badgeSeveridade(resumo.severidadeMaxima)}
+        ${contagem}
+      </div>
+      ${tipos}
+      ${faixaTempo(serie)}
+    </div>`;
+}
+
+// Barra proporcional ao tempo, marcando onde cada severidade ocorre. Trechos
+// contíguos viram um segmento só, então a barra não depende do número de passos.
+function faixaTempo(serie) {
+  if (!serie || serie.length < 2) return '';
+  const trechos = [];
+  for (const passo of serie) {
+    const sev = passo.severidade || null;
+    const ultimo = trechos[trechos.length - 1];
+    if (ultimo && ultimo.sev === sev) ultimo.n += 1;
+    else trechos.push({ sev, n: 1 });
+  }
+  if (trechos.length === 1 && !trechos[0].sev) {
+    return `<div class="faixa-tempo" role="img" aria-label="Nenhuma violação ao longo do período">
+              <span class="faixa-trecho faixa-ok" style="flex:1"></span>
+            </div>`;
+  }
+  const descricao = trechos
+    .filter((t) => t.sev)
+    .map((t) => NOMES_SEVERIDADE[t.sev] || t.sev)
+    .join('; ');
+  const segmentos = trechos.map((t) => {
+    const classe = t.sev ? `faixa-${t.sev}` : 'faixa-ok';
+    const titulo = t.sev ? ` title="${esc(NOMES_SEVERIDADE[t.sev] || t.sev)}"` : '';
+    return `<span class="faixa-trecho ${classe}" style="flex:${t.n}"${titulo}></span>`;
+  }).join('');
+  return `
+    <div class="faixa-tempo" role="img" aria-label="Linha do tempo das violações: ${esc(descricao)}">
+      ${segmentos}
+    </div>
+    <p class="faixa-legenda"><span>início</span><span>fim do período</span></p>`;
+}
+
+// Números de apoio, agrupados por grandeza. Início e fim aparecem como uma
+// transição, não como dois cartões soltos que o leitor precisa subtrair.
+function metricas(r) {
+  return `
+    <div class="metricas">
+      ${grupo('Nível', [
+    transicao(`${num(r.cotaInicial)} m`, `${num(r.cotaFinal)} m`, r.variacaoCota, 'm'),
+    item('Mínimo no período', `${num(r.cotaMinima)} m`),
+    item('Máximo no período', `${num(r.cotaMaxima)} m`),
+  ])}
+      ${grupo('Volume', [
+    transicao(`${num(r.volumeInicial)} hm³`, `${num(r.volumeFinal)} hm³`, r.variacaoVolume, 'hm³'),
+    item('Duração', esc(r.duracaoTexto)),
+  ])}
+      ${grupo('Vazões médias', [
+    item('Afluente', `${num(r.qafMedia)} m³/s`),
+    item('Defluente', `${num(r.qdefMedia)} m³/s`),
+    item('Balanço', `${sinal(r.qafMedia - r.qdefMedia)} m³/s`),
+  ])}
+    </div>`;
+}
+
+function grupo(titulo, itens) {
+  return `
+    <div class="metrica-grupo">
+      <h3>${esc(titulo)}</h3>
+      ${itens.join('')}
+    </div>`;
+}
+
+function item(rotulo, valor) {
+  return `<div class="metrica"><span>${esc(rotulo)}</span><strong>${valor}</strong></div>`;
+}
+
+function transicao(de, para, delta, unidade) {
+  const positivo = delta > 0.005;
+  const negativo = delta < -0.005;
+  const classe = positivo ? 'delta-sobe' : negativo ? 'delta-desce' : 'delta-igual';
+  return `
+    <div class="metrica metrica-transicao">
+      <span>Início → fim</span>
+      <strong>
+        <span class="transicao-de">${de}</span>
+        <span class="transicao-seta" aria-hidden="true">→</span>
+        <span class="transicao-para">${para}</span>
+      </strong>
+      <em class="delta ${classe}">${sinal(delta)} ${esc(unidade)}</em>
+    </div>`;
+}
+
 function sinal(valor) {
+  if (!Number.isFinite(valor)) return '—';
   const texto = num(Math.abs(valor));
-  if (Math.abs(valor) < 0.005) return `0,00`;
+  if (Math.abs(valor) < 0.005) return '0,00';
   return `${valor > 0 ? '+' : '−'}${texto}`;
 }
 

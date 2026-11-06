@@ -233,8 +233,9 @@ async function renderDetalhe(container, id) {
         </div>
       </details>
 
-      <div class="grafico-caixa ${cavAtual ? '' : 'oculto'}" id="caixa-grafico-cav">
-        <canvas id="grafico-cav"></canvas>
+      <div class="graficos-par ${cavAtual ? '' : 'oculto'}" id="caixa-grafico-cav">
+        <div class="grafico-caixa"><canvas id="grafico-cav-volume"></canvas></div>
+        <div class="grafico-caixa"><canvas id="grafico-cav-area"></canvas></div>
       </div>
     </section>
 
@@ -247,7 +248,7 @@ async function renderDetalhe(container, id) {
   const desenharCav = () => {
     if (cavAtual) {
       $('#caixa-grafico-cav', container).classList.remove('oculto');
-      graficoCav('grafico-cav', cavAtual);
+      graficoCav('grafico-cav-volume', 'grafico-cav-area', cavAtual);
     } else {
       $('#caixa-grafico-cav', container).classList.add('oculto');
     }
