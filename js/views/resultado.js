@@ -193,11 +193,26 @@ function metricas(r) {
     transicao(`${num(r.volumeInicial)} hm³`, `${num(r.volumeFinal)} hm³`, r.variacaoVolume, 'hm³'),
     item('Duração', esc(r.duracaoTexto)),
   ])}
-      ${grupo('Vazões médias', [
-    item('Afluente', `${num(r.qafMedia)} m³/s`),
-    item('Defluente', `${num(r.qdefMedia)} m³/s`),
-    item('Balanço', `${sinal(r.qafMedia - r.qdefMedia)} m³/s`),
-  ])}
+      ${grupo('Vazões médias', r.passosContidos
+    ? [
+      item('Afluente', `${num(r.qafMedia)} m³/s`),
+      item('Defluente informada', `${num(r.qdefInformadaMedia)} m³/s`),
+      item('Defluente necessária', `${num(r.qdefMedia)} m³/s`),
+    ]
+    : [
+      item('Afluente', `${num(r.qafMedia)} m³/s`),
+      item('Defluente', `${num(r.qdefMedia)} m³/s`),
+      item('Balanço', `${sinal(r.qafMedia - r.qdefMedia)} m³/s`),
+    ])}
+      ${r.passosContidos ? grupo('Contenção na emergência', [
+    item('Passos contidos', `${r.passosContidos} de ${r.passos + 1}`),
+    r.acrescimoMaxQdef > 0.005
+      ? item('Defluir a mais, no pico', `+${num(r.acrescimoMaxQdef)} m³/s`)
+      : '',
+    r.reducaoMaxQdef > 0.005
+      ? item('Defluir a menos, no pico', `−${num(r.reducaoMaxQdef)} m³/s`)
+      : '',
+  ].filter(Boolean)) : ''}
     </div>`;
 }
 

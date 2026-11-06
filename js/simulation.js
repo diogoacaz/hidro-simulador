@@ -119,8 +119,18 @@ function severidadeMaxima(violacoes) {
 function integrar({ cav, volumeInicial, qaf, qdef, passos, dataInicial, limites, restricoes }) {
   const serie = [];
   const { volumeMin, volumeMax, cotaMin, cotaMax } = limitesCav(cav);
+
+  // Os limites de emergência viram volume uma vez só: o balanço corre em
+  // volume, e é nele que a contenção precisa agir.
+  const vMaxEmerg = Number.isFinite(limites.nivelMaxEmergencial)
+    ? volumeDaCota(cav, limites.nivelMaxEmergencial) : null;
+  const vMinEmerg = Number.isFinite(limites.nivelMinEmergencial)
+    ? volumeDaCota(cav, limites.nivelMinEmergencial) : null;
+
   let volume = volumeInicial;
   let saiuDaCav = false;
+  let contido = null;   // marcação herdada do passo anterior
+  let semFolgaMin = false;
 
   for (let i = 0; i <= passos; i++) {
     const dataHora = new Date(dataInicial.getTime() + i * PASSO_SEGUNDOS * 1000);
@@ -128,15 +138,62 @@ function integrar({ cav, volumeInicial, qaf, qdef, passos, dataInicial, limites,
     const ativas = restricoesAtivas(restricoes, dataHora);
     const violacoes = violacoesNaCota(cota, limites, ativas);
 
+    // Contido significa cota EXATAMENTE no limite, e violacoesNaCota compara
+    // com > e <: sem esta marcação a emergência deixaria de ser sinalizada
+    // justamente quando ela determina a operação.
+    if (contido) violacoes.push(contido);
+
     // O volume inicial pode vir de fora da tabela (ex.: nível inicial reconstituído).
     if (i === 0 && (volume < volumeMin - 1e-9 || volume > volumeMax + 1e-9)) saiuDaCav = true;
+
+    const indice = i < passos ? i : passos - 1;
+    const qafPasso = vazaoNoPasso(qaf, indice);
+    const qdefInformada = vazaoNoPasso(qdef, indice);
+    let qdefEfetiva = qdefInformada;
+    let proximo = volume;
+    contido = null;
+
+    if (i < passos) {
+      let bruto = volume + (qafPasso - qdefInformada) * HM3_POR_M3S;
+
+      if (vMaxEmerg !== null && bruto > vMaxEmerg + 1e-12) {
+        // Segurar o nível no máximo emergencial exige verter o excesso.
+        qdefEfetiva = qdefInformada + (bruto - vMaxEmerg) / HM3_POR_M3S;
+        bruto = vMaxEmerg;
+      } else if (vMinEmerg !== null && bruto < vMinEmerg - 1e-12) {
+        // Segurar o nível no mínimo exige liberar menos — e não existe
+        // defluência negativa. Sem folga, o nível cai mesmo assim.
+        const reducao = (vMinEmerg - bruto) / HM3_POR_M3S;
+        qdefEfetiva = Math.max(0, qdefInformada - reducao);
+        bruto = volume + (qafPasso - qdefEfetiva) * HM3_POR_M3S;
+        // Zerar a defluência é o máximo que se pode fazer. Só há queda real se
+        // o nível ainda ficar abaixo do limite depois disso — o que acontece
+        // quando já se partiu de baixo dele.
+        if (qdefEfetiva === 0 && bruto < vMinEmerg - 1e-9) semFolgaMin = true;
+      }
+
+      // Detecta a excursão antes de saturar: depois da saturação a informação se perde.
+      if (bruto < volumeMin - 1e-9 || bruto > volumeMax + 1e-9) saiuDaCav = true;
+      proximo = Math.min(Math.max(bruto, volumeMin), volumeMax);
+
+      const manobra = qdefEfetiva - qdefInformada;
+      if (Math.abs(manobra) > 1e-9) {
+        contido = {
+          severidade: 'critico',
+          limite: manobra > 0 ? limites.nivelMaxEmergencial : limites.nivelMinEmergencial,
+          tipo: manobra > 0 ? 'Emergencial máximo (contido)' : 'Emergencial mínimo (contido)',
+        };
+      }
+    }
 
     serie.push({
       passo: i,
       dataHora: dataHora.toISOString(),
       minutos: i * 15,
-      qaf: i < passos ? vazaoNoPasso(qaf, i) : vazaoNoPasso(qaf, passos - 1),
-      qdef: i < passos ? vazaoNoPasso(qdef, i) : vazaoNoPasso(qdef, passos - 1),
+      qaf: qafPasso,
+      qdef: qdefEfetiva,
+      qdefInformada,
+      manobra: qdefEfetiva - qdefInformada,
       volume,
       cota,
       area: areaDaCota(cav, cota),
@@ -144,15 +201,10 @@ function integrar({ cav, volumeInicial, qaf, qdef, passos, dataInicial, limites,
       severidade: severidadeMaxima(violacoes),
     });
 
-    if (i < passos) {
-      // Detecta a excursão antes de saturar: depois da saturação a informação se perde.
-      const bruto = volume + (vazaoNoPasso(qaf, i) - vazaoNoPasso(qdef, i)) * HM3_POR_M3S;
-      if (bruto < volumeMin - 1e-9 || bruto > volumeMax + 1e-9) saiuDaCav = true;
-      volume = Math.min(Math.max(bruto, volumeMin), volumeMax);
-    }
+    if (i < passos) volume = proximo;
   }
 
-  return { serie, saiuDaCav, cotaMin, cotaMax };
+  return { serie, saiuDaCav, cotaMin, cotaMax, semFolgaMin };
 }
 
 // Soma o volume acumulado (hm³) ao longo de `passos` passos.
@@ -294,7 +346,7 @@ export function simular(cfg) {
 function montarResultado(cfg, incognita, alertas) {
   const { cav, limites = {}, restricoes = [], dataInicial, passos } = cfg;
   const volumeInicial = volumeDaCota(cav, cfg.nivelInicial);
-  const { serie, saiuDaCav, cotaMin, cotaMax } = integrar({
+  const { serie, saiuDaCav, cotaMin, cotaMax, semFolgaMin } = integrar({
     cav,
     volumeInicial,
     qaf: cfg.qaf,
@@ -307,6 +359,31 @@ function montarResultado(cfg, incognita, alertas) {
 
   if (saiuDaCav) {
     alertas.push(`O nível saiu da faixa da tabela CAV (${fmt(cotaMin)} m a ${fmt(cotaMax)} m) e foi saturado no extremo.`);
+  }
+
+  // Contenção nos limites de emergência: o nível para no limite e a diferença
+  // aparece como manobra de defluência, em vez de sumir do balanço.
+  const contidos = serie.filter((s) => Math.abs(s.manobra) > 1e-9);
+  const acrescimoMaxQdef = contidos.reduce((m, s) => Math.max(m, s.manobra), 0);
+  const reducaoMaxQdef = contidos.reduce((m, s) => Math.max(m, -s.manobra), 0);
+
+  if (acrescimoMaxQdef > 1e-9) {
+    alertas.push(
+      `O nível atingiu o máximo emergencial (${fmt(limites.nivelMaxEmergencial)} m) e foi contido ali. `
+      + `Segurá-lo exige defluir até ${fmt(acrescimoMaxQdef)} m³/s acima do informado.`
+    );
+  }
+  if (reducaoMaxQdef > 1e-9) {
+    alertas.push(
+      `O nível atingiu o mínimo emergencial (${fmt(limites.nivelMinEmergencial)} m) e foi contido ali. `
+      + `Segurá-lo exige defluir até ${fmt(reducaoMaxQdef)} m³/s abaixo do informado.`
+    );
+  }
+  if (semFolgaMin) {
+    alertas.push(
+      'Em algum passo seria preciso defluência negativa para segurar o mínimo emergencial: '
+      + 'ela foi zerada e, ainda assim, o nível permaneceu abaixo do limite.'
+    );
   }
 
   const cotas = serie.map((s) => s.cota);
@@ -330,6 +407,10 @@ function montarResultado(cfg, incognita, alertas) {
     cotaMaxima: Math.max(...cotas),
     qafMedia: media(serie.slice(0, passos).map((s) => s.qaf)),
     qdefMedia: media(serie.slice(0, passos).map((s) => s.qdef)),
+    qdefInformadaMedia: media(serie.slice(0, passos).map((s) => s.qdefInformada)),
+    passosContidos: contidos.length,
+    acrescimoMaxQdef,
+    reducaoMaxQdef,
     passosComViolacao: passosViolados.length,
     severidadeMaxima: severidadeMaxima(passosViolados.flatMap((s) => s.violacoes)),
     tiposViolacao: [...new Set(passosViolados.flatMap((s) => s.violacoes.map((v) => v.tipo)))],

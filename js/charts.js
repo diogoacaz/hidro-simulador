@@ -252,6 +252,9 @@ const pluginRotulosFim = {
     chart.data.datasets.forEach((ds, i) => {
       const meta = chart.getDatasetMeta(i);
       if (meta.hidden || !meta.data || !meta.data.length) return;
+      // A linha de cenário (defluente informada) fica só na legenda: três
+      // rótulos no fim de um gráfico estreito se atropelam.
+      if (ds.semRotuloFim) return;
       const ponto = meta.data[meta.data.length - 1];
       if (!ponto) return;
       const texto = String(ds.label || '').replace(/\s*\(.*\)\s*$/, '');
@@ -482,15 +485,26 @@ export function graficoVazoes(canvasId, serie) {
   refazer.set(canvasId, () => graficoVazoes(canvasId, serie));
   const pontos = amostrar(serie);
   const c = cores();
+  const datasets = [
+    serieLinha('Afluente (m³/s)', pontos.map((p) => p.qaf), c.qaf, { preencher: false }),
+    serieLinha('Defluente (m³/s)', pontos.map((p) => p.qdef), c.qdef, { preencher: false }),
+  ];
+
+  // Com contenção na emergência a defluente plotada é a NECESSÁRIA para
+  // segurar o nível. A informada entra tracejada ao lado, na mesma cor: é a
+  // mesma grandeza em outro cenário, não outra série.
+  if (pontos.some((p) => Math.abs(p.manobra || 0) > 1e-9)) {
+    const informada = serieLinha('Defluente informada (m³/s)',
+      pontos.map((p) => p.qdefInformada), c.qdef, { preencher: false });
+    informada.borderDash = [5, 4];
+    informada.borderWidth = 1.5;
+    informada.semRotuloFim = true;
+    datasets.push(informada);
+  }
+
   return criarGrafico(canvasId, {
     type: 'line',
-    data: {
-      labels: rotularPontos(pontos),
-      datasets: [
-        serieLinha('Afluente (m³/s)', pontos.map((p) => p.qaf), c.qaf, { preencher: false }),
-        serieLinha('Defluente (m³/s)', pontos.map((p) => p.qdef), c.qdef, { preencher: false }),
-      ],
-    },
+    data: { labels: rotularPontos(pontos), datasets },
     options: opcoesBase({
       titulo: 'Vazões × tempo', tituloEixoY: 'Vazão (m³/s)', pontos,
       legenda: true, unidade: 'm³/s',
