@@ -13,6 +13,13 @@ export const PASSO_SEGUNDOS = 900; // 15 min
 const HM3_POR_M3S = PASSO_SEGUNDOS / 1e6;
 const MAX_PASSOS_BUSCA = 35040; // 1 ano de passos de 15 min
 
+// Números que chegam ao usuário seguem o formato pt-BR, como no resto do app:
+// o motor não importa a camada de interface, então traz o seu próprio.
+function fmt(valor, casas = 2) {
+  if (!Number.isFinite(valor)) return '—';
+  return valor.toLocaleString('pt-BR', { minimumFractionDigits: casas, maximumFractionDigits: casas });
+}
+
 export const MODOS = {
   TEMPO: 'tempo',
   QAF: 'qaf',
@@ -193,7 +200,7 @@ function resolverTempo(cfg) {
     return {
       alcancado: false,
       passos: maxPassos,
-      alerta: `O nível alvo de ${nivelFinal.toFixed(2)} m não é atingido em até ${(maxPassos / 4).toFixed(0)} h com as vazões informadas.`,
+      alerta: `O nível alvo de ${fmt(nivelFinal)} m não é atingido em até ${fmt(maxPassos / 4, 0)} h com as vazões informadas.`,
     };
   }
   return { alcancado: true, passosFracionarios: passosAteAlvo, passos: Math.ceil(passosAteAlvo) };
@@ -242,9 +249,9 @@ export function simular(cfg) {
     // Balanço de volume é linear nas vazões: a afluência média equivalente é exata.
     const qafEq = ((vf - v0) * 1e6) / segundos + vazaoMedia(qdef, passos);
     if (qafEq < 0) {
-      alertas.push(`A afluência equivalente resultou negativa (${qafEq.toFixed(2)} m³/s): o cenário informado é fisicamente inviável.`);
+      alertas.push(`A afluência equivalente resultou negativa (${fmt(qafEq)} m³/s): o cenário informado é fisicamente inviável.`);
     }
-    incognita = { variavel: MODOS.QAF, valor: qafEq, unidade: 'm³/s', texto: `${qafEq.toFixed(2)} m³/s (constante equivalente)` };
+    incognita = { variavel: MODOS.QAF, valor: qafEq, unidade: 'm³/s', texto: `${fmt(qafEq)} m³/s (constante equivalente)` };
     return montarResultado({ ...cfg, qaf: { tipo: 'constante', valor: qafEq }, passos, dataInicial }, incognita, alertas);
   } else if (modo === MODOS.QDEF) {
     const v0 = volumeDaCota(cav, cfg.nivelInicial);
@@ -252,9 +259,9 @@ export function simular(cfg) {
     const segundos = passos * PASSO_SEGUNDOS;
     const qdefEq = vazaoMedia(qaf, passos) - ((vf - v0) * 1e6) / segundos;
     if (qdefEq < 0) {
-      alertas.push(`A defluência equivalente resultou negativa (${qdefEq.toFixed(2)} m³/s): não é possível atingir o nível alvo apenas liberando água.`);
+      alertas.push(`A defluência equivalente resultou negativa (${fmt(qdefEq)} m³/s): não é possível atingir o nível alvo apenas liberando água.`);
     }
-    incognita = { variavel: MODOS.QDEF, valor: qdefEq, unidade: 'm³/s', texto: `${qdefEq.toFixed(2)} m³/s (constante equivalente)` };
+    incognita = { variavel: MODOS.QDEF, valor: qdefEq, unidade: 'm³/s', texto: `${fmt(qdefEq)} m³/s (constante equivalente)` };
     return montarResultado({ ...cfg, qdef: { tipo: 'constante', valor: qdefEq }, passos, dataInicial }, incognita, alertas);
   } else if (modo === MODOS.NIVEL_INICIAL) {
     const vf = volumeDaCota(cav, cfg.nivelFinal);
@@ -262,12 +269,12 @@ export function simular(cfg) {
     const faixa = limitesCav(cav);
     if (v0 < faixa.volumeMin - 1e-9 || v0 > faixa.volumeMax + 1e-9) {
       alertas.push(
-        `O volume inicial reconstituído (${v0.toFixed(2)} hm³) está fora da tabela CAV ` +
-        `(${faixa.volumeMin.toFixed(2)} a ${faixa.volumeMax.toFixed(2)} hm³): o cenário informado não é compatível com este reservatório.`
+        `O volume inicial reconstituído (${fmt(v0)} hm³) está fora da tabela CAV ` +
+        `(${fmt(faixa.volumeMin)} a ${fmt(faixa.volumeMax)} hm³): o cenário informado não é compatível com este reservatório.`
       );
     }
     nivelInicial = cotaDoVolume(cav, v0);
-    incognita = { variavel: MODOS.NIVEL_INICIAL, valor: nivelInicial, unidade: 'm', texto: `${nivelInicial.toFixed(2)} m` };
+    incognita = { variavel: MODOS.NIVEL_INICIAL, valor: nivelInicial, unidade: 'm', texto: `${fmt(nivelInicial)} m` };
   }
 
   const resultado = montarResultado({ ...cfg, nivelInicial, passos, dataInicial }, incognita, alertas);
@@ -278,7 +285,7 @@ export function simular(cfg) {
       variavel: MODOS.NIVEL_FINAL,
       valor: ultimo.cota,
       unidade: 'm',
-      texto: `${ultimo.cota.toFixed(2)} m`,
+      texto: `${fmt(ultimo.cota)} m`,
     };
   }
   return resultado;
@@ -299,7 +306,7 @@ function montarResultado(cfg, incognita, alertas) {
   });
 
   if (saiuDaCav) {
-    alertas.push(`O nível saiu da faixa da tabela CAV (${cotaMin.toFixed(2)} m a ${cotaMax.toFixed(2)} m) e foi saturado no extremo.`);
+    alertas.push(`O nível saiu da faixa da tabela CAV (${fmt(cotaMin)} m a ${fmt(cotaMax)} m) e foi saturado no extremo.`);
   }
 
   const cotas = serie.map((s) => s.cota);

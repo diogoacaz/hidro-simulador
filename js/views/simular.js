@@ -46,7 +46,12 @@ export async function render(container) {
           ? '<div class="alerta alerta-aviso">Nenhum reservatório tem tabela CAV importada. Importe a CAV na aba Reservatórios.</div>'
           : ''}
 
-      <form id="form-simulacao">
+      <!-- novalidate: um campo escondido pelo modo atual, com valor fora da
+           faixa, deixa o formulário inválido e o navegador cancela o submit
+           sem conseguir exibir a mensagem (o controle não é focável). A
+           validação de montarConfig cobre os mesmos casos com mensagem
+           melhor, então ela é a única que vale. -->
+      <form id="form-simulacao" novalidate>
         <div class="grade grade-2">
           <label>Reservatório
             <select id="reservatorio" ${comCav.length ? '' : 'disabled'}>
@@ -122,11 +127,16 @@ export async function render(container) {
     info.innerHTML = `Faixa da CAV: <strong>${num(l.cotaMin)} m</strong> a <strong>${num(l.cotaMax)} m</strong>
       (${num(l.volumeMin)} a ${num(l.volumeMax)} hm³) · limites operacionais:
       ${fmt(estado.reservatorio.nivelMinOperacional)} a ${fmt(estado.reservatorio.nivelMaxOperacional)} m`;
+    // Cada reservatório tem sua faixa de cota, e elas podem nem se sobrepor.
+    // Um nível herdado da seleção anterior fica fora da CAV nova e impediria a
+    // simulação, então só se preserva o que ainda couber na faixa.
     for (const campo of ['nivelInicial', 'nivelFinal']) {
       const input = $(`#${campo}`, container);
       input.min = l.cotaMin;
       input.max = l.cotaMax;
-      if (!input.value) input.value = ((l.cotaMin + l.cotaMax) / 2).toFixed(2);
+      const atual = valorNumerico(input);
+      const cabe = atual != null && atual >= l.cotaMin - 1e-9 && atual <= l.cotaMax + 1e-9;
+      if (!cabe) input.value = ((l.cotaMin + l.cotaMax) / 2).toFixed(2);
     }
   };
 

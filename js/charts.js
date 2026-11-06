@@ -167,10 +167,34 @@ const pluginLimites = {
     ctx.font = `500 10px ${FONTE.family}`;
     ctx.textBaseline = 'middle';
 
+    // Limites fora da escala ganham um aviso na borda. Sem isto o gráfico não
+    // explica uma violação que o painel de situação acusa — é o caso de uma
+    // restrição distante da faixa em que o nível de fato andou.
+    const foraDaEscala = { acima: 0, abaixo: 0 };
+
     for (const l of linhas) {
       if (!Number.isFinite(l.valor)) continue;
       const py = y.getPixelForValue(l.valor);
-      if (py < chartArea.top - 1 || py > chartArea.bottom + 1) continue;
+
+      const lado = py < chartArea.top - 1 ? 'acima' : py > chartArea.bottom + 1 ? 'abaixo' : null;
+      if (lado) {
+        const seta = lado === 'acima' ? '↑' : '↓';
+        const valor = l.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const aviso = `${seta} ${l.rotulo} ${valor}`;
+        const largura = ctx.measureText(aviso).width;
+        const deslocamento = foraDaEscala[lado] * 15;
+        const ly = lado === 'acima'
+          ? chartArea.top + 9 + deslocamento
+          : chartArea.bottom - 9 - deslocamento;
+        foraDaEscala[lado] += 1;
+        ctx.fillStyle = opts.superficie;
+        ctx.globalAlpha = 0.88;
+        ctx.fillRect(chartArea.right - largura - 6, ly - 8, largura + 8, 16);
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = l.cor;
+        ctx.fillText(aviso, chartArea.right - largura - 2, ly);
+        continue;
+      }
 
       // A linha para antes do rótulo, em vez de passar por baixo dele.
       const texto = l.rotulo;
@@ -322,7 +346,11 @@ function opcoesBase({ titulo, tituloEixoY, pontos, legenda = false, unidade = ''
       y: {
         border: { display: false },
         grid: { color: c.grade, drawTicks: false, lineWidth: 1 },
-        ticks: { color: c.suave, font: { ...FONTE, size: 10 }, padding: 10, maxTicksLimit: 6 },
+        ticks: {
+          color: c.suave, font: { ...FONTE, size: 10 }, padding: 10, maxTicksLimit: 6,
+          // Chart.js formata número no padrão da engine, não no do app.
+          callback: (v) => Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 3 }),
+        },
         title: {
           display: !!tituloEixoY, text: tituloEixoY, color: c.suave,
           font: { ...FONTE, size: 10 }, padding: { bottom: 6 },
