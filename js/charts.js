@@ -568,3 +568,87 @@ export function graficoCav(canvasVolumeId, canvasAreaId, cav) {
     });
   }
 }
+
+/* ------------------------------------------------------------------ *
+ * Amortecimento de cheia
+ *
+ * Três gráficos de papel claro em vez de um com três séries: afluente,
+ * bombeado e vertido não passam na separação de cores num plot só (verde e
+ * azul ficam a ΔE 14, abaixo do piso de 15 para visão normal). Separados,
+ * cada um fica com uma ou duas séries e a leitura melhora.
+ * ------------------------------------------------------------------ */
+
+/** Vertimento × tempo, com a linha do limite que começa a alagar. */
+export function graficoVertimento(canvasId, serie, limiteSemDano) {
+  refazer.set(canvasId, () => graficoVertimento(canvasId, serie, limiteSemDano));
+  const pontos = amostrar(serie);
+  const c = cores();
+
+  const opcoes = opcoesBase({
+    titulo: 'Vertimento × tempo', tituloEixoY: 'Vazão vertida (m³/s)', pontos, unidade: 'm³/s',
+  });
+  if (Number.isFinite(limiteSemDano)) {
+    opcoes.plugins.limites = {
+      lista: [{ rotulo: 'início do alagamento', valor: limiteSemDano, cor: c.emergencial }],
+      superficie: c.superficie,
+    };
+    // A faixa sem dano fica sombreada: é nela que a operação quer ficar.
+    opcoes.plugins.faixas = {
+      lista: [{ de: 0, ate: limiteSemDano, cor: rgba(c.nivel, temaEscuro.matches ? 0.06 : 0.09) }],
+    };
+  }
+
+  return criarGrafico(canvasId, {
+    type: 'line',
+    data: {
+      labels: rotularPontos(pontos),
+      datasets: [serieLinha('Vertido (m³/s)', pontos.map((p) => p.qvert), c.qdef)],
+    },
+    options: opcoes,
+  });
+}
+
+/** Afluência contra retirada total (bombeamento + vertimento). */
+export function graficoAfluenteSaida(canvasId, serie) {
+  refazer.set(canvasId, () => graficoAfluenteSaida(canvasId, serie));
+  const pontos = amostrar(serie);
+  const c = cores();
+  return criarGrafico(canvasId, {
+    type: 'line',
+    data: {
+      labels: rotularPontos(pontos),
+      datasets: [
+        serieLinha('Afluente (m³/s)', pontos.map((p) => p.qaf), c.qaf, { preencher: false }),
+        serieLinha('Retirada total (m³/s)', pontos.map((p) => p.qsaida), c.qdef, { preencher: false }),
+      ],
+    },
+    options: opcoesBase({
+      titulo: 'Afluência × retirada', tituloEixoY: 'Vazão (m³/s)', pontos,
+      legenda: true, unidade: 'm³/s',
+    }),
+  });
+}
+
+/** Bombeamento efetivo contra o disponível na cota — mostra onde a captação para. */
+export function graficoBombeamento(canvasId, serie) {
+  refazer.set(canvasId, () => graficoBombeamento(canvasId, serie));
+  const pontos = amostrar(serie);
+  const c = cores();
+  const disponivel = serieLinha('Disponível na cota (m³/s)',
+    pontos.map((p) => p.bombeamentoDisponivel), c.nivel, { preencher: false });
+  disponivel.borderDash = [5, 4];
+  disponivel.borderWidth = 1.5;
+  disponivel.semRotuloFim = true;
+
+  return criarGrafico(canvasId, {
+    type: 'line',
+    data: {
+      labels: rotularPontos(pontos),
+      datasets: [serieLinha('Bombeado (m³/s)', pontos.map((p) => p.qbomb), c.nivel), disponivel],
+    },
+    options: opcoesBase({
+      titulo: 'Bombeamento × tempo', tituloEixoY: 'Vazão bombeada (m³/s)', pontos,
+      legenda: true, unidade: 'm³/s',
+    }),
+  });
+}

@@ -3,6 +3,7 @@
 import * as db from './db.js';
 import { $, $$, erroNaTela, carregando } from './ui.js';
 import * as viewSimular from './views/simular.js';
+import * as viewCheia from './views/cheia.js';
 import * as viewUsinas from './views/usinas.js';
 import * as viewReservatorios from './views/reservatorios.js';
 import * as viewRegistros from './views/registros.js';
@@ -11,6 +12,7 @@ import { destruirTodos } from './charts.js';
 
 const ROTAS = {
   simular: viewSimular,
+  cheia: viewCheia,
   usinas: viewUsinas,
   reservatorios: viewReservatorios,
   registros: viewRegistros,
