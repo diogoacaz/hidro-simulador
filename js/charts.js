@@ -136,15 +136,18 @@ const pluginFaixas = {
     const faixas = opts && opts.lista;
     if (!faixas || !faixas.length) return;
     const { ctx, chartArea, scales } = chart;
-    const y = scales.y;
-    if (!y || !chartArea) return;
+    if (!chartArea) return;
 
     ctx.save();
     for (const f of faixas) {
-      const de = Number.isFinite(f.de) ? y.getPixelForValue(f.de) : chartArea.bottom;
-      const ate = Number.isFinite(f.ate) ? y.getPixelForValue(f.ate) : chartArea.top;
-      const topo = Math.max(chartArea.top, Math.min(de, ate));
-      const base = Math.min(chartArea.bottom, Math.max(de, ate));
+      const y = scales[f.eixo || 'y'];
+      if (!y) continue;
+      const limiteTopo = Math.max(chartArea.top, y.top);
+      const limiteBase = Math.min(chartArea.bottom, y.bottom);
+      const de = Number.isFinite(f.de) ? y.getPixelForValue(f.de) : limiteBase;
+      const ate = Number.isFinite(f.ate) ? y.getPixelForValue(f.ate) : limiteTopo;
+      const topo = Math.max(limiteTopo, Math.min(de, ate));
+      const base = Math.min(limiteBase, Math.max(de, ate));
       if (base <= topo) continue;
       ctx.fillStyle = f.cor;
       ctx.fillRect(chartArea.left, topo, chartArea.right - chartArea.left, base - topo);
@@ -160,8 +163,7 @@ const pluginLimites = {
     const linhas = opts && opts.lista;
     if (!linhas || !linhas.length) return;
     const { ctx, chartArea, scales } = chart;
-    const y = scales.y;
-    if (!y || !chartArea) return;
+    if (!chartArea) return;
 
     ctx.save();
     ctx.font = `500 10px ${FONTE.family}`;
@@ -174,9 +176,14 @@ const pluginLimites = {
 
     for (const l of linhas) {
       if (!Number.isFinite(l.valor)) continue;
+      const y = scales[l.eixo || 'y'];
+      if (!y) continue;
+      // Com painéis empilhados cada escala ocupa só a sua faixa do gráfico.
+      const topoEixo = Math.max(chartArea.top, y.top);
+      const baseEixo = Math.min(chartArea.bottom, y.bottom);
       const py = y.getPixelForValue(l.valor);
 
-      const lado = py < chartArea.top - 1 ? 'acima' : py > chartArea.bottom + 1 ? 'abaixo' : null;
+      const lado = py < topoEixo - 1 ? 'acima' : py > baseEixo + 1 ? 'abaixo' : null;
       if (lado) {
         const seta = lado === 'acima' ? '↑' : '↓';
         const valor = l.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -184,8 +191,8 @@ const pluginLimites = {
         const largura = ctx.measureText(aviso).width;
         const deslocamento = foraDaEscala[lado] * 15;
         const ly = lado === 'acima'
-          ? chartArea.top + 9 + deslocamento
-          : chartArea.bottom - 9 - deslocamento;
+          ? topoEixo + 9 + deslocamento
+          : baseEixo - 9 - deslocamento;
         foraDaEscala[lado] += 1;
         ctx.fillStyle = opts.superficie;
         ctx.globalAlpha = 0.88;
@@ -702,5 +709,95 @@ export function graficoBombeamento(canvasId, serie) {
       titulo: 'Bombeamento × tempo', tituloEixoY: 'Vazão bombeada (m³/s)', pontos,
       legenda: true, unidade: 'm³/s',
     }),
+  });
+}
+
+/**
+ * Nível e vertimento no mesmo eixo de tempo, em dois painéis empilhados.
+ *
+ * Cota (≈360 m) e vazão (0–100 m³/s) não cabem numa escala só — o nível
+ * viraria uma reta. E eixo duplo é pior: o alinhamento entre as duas escalas
+ * é arbitrário e sugere uma correlação que o dado não tem.
+ *
+ * A solução correta para grandezas de unidades diferentes é empilhar painéis
+ * compartilhando o eixo do tempo, de modo que a leitura seja vertical: o que
+ * aconteceu com o nível no instante em que a comporta abriu está logo acima.
+ * Chart.js faz isso com escalas empilhadas (`stack` + `stackWeight`), num
+ * canvas só, o que garante o alinhamento e mantém um tooltip único.
+ */
+export function graficoNivelVertimento(canvasId, serie, limites = {}) {
+  refazer.set(canvasId, () => graficoNivelVertimento(canvasId, serie, limites));
+  const pontos = amostrar(serie);
+  const c = cores();
+  const { nivelMaximo, nivelMinimo, limiteSemDano } = limites;
+
+  const opcoes = opcoesBase({
+    titulo: 'Nível × vertimento', tituloEixoY: '', pontos, legenda: true,
+  });
+
+  // O tooltip precisa da unidade por série: os dois painéis medem coisas
+  // diferentes.
+  opcoes.plugins.tooltip.callbacks.label = (item) => {
+    const metros = item.dataset.yAxisID === 'yNivel';
+    const casas = metros ? 2 : 1;
+    const v = item.parsed.y;
+    const texto = Number.isFinite(v)
+      ? v.toLocaleString('pt-BR', { minimumFractionDigits: casas, maximumFractionDigits: casas })
+      : '—';
+    return ` ${item.dataset.label.replace(/\s*\(.*\)\s*$/, '')}  ${texto} ${metros ? 'm' : 'm³/s'}`;
+  };
+
+  const linhas = [];
+  if (Number.isFinite(nivelMaximo)) {
+    linhas.push({ rotulo: 'máximo', valor: nivelMaximo, cor: c.emergencial, eixo: 'yNivel' });
+  }
+  if (Number.isFinite(nivelMinimo)) {
+    linhas.push({ rotulo: 'mínimo', valor: nivelMinimo, cor: c.emergencial, eixo: 'yNivel' });
+  }
+  if (Number.isFinite(limiteSemDano)) {
+    linhas.push({ rotulo: 'alaga', valor: limiteSemDano, cor: c.emergencial, eixo: 'yVert' });
+  }
+  opcoes.plugins.limites = { lista: linhas, superficie: c.superficie };
+  if (Number.isFinite(nivelMaximo) || Number.isFinite(nivelMinimo)) {
+    opcoes.plugins.faixas = {
+      lista: [{
+        de: nivelMinimo, ate: nivelMaximo, eixo: 'yNivel',
+        cor: rgba(c.nivel, temaEscuro.matches ? 0.05 : 0.07),
+      }],
+    };
+  }
+
+  const eixoY = (titulo, peso, ocultarMinimo = false) => ({
+    stack: 'paineis',
+    stackWeight: peso,
+    border: { display: false },
+    grid: { color: c.grade, drawTicks: false, lineWidth: 1 },
+    ticks: {
+      color: c.suave, font: { ...FONTE, size: 10 }, padding: 10, maxTicksLimit: 4,
+      // Na junção dos painéis a marca de baixo de um encosta na de cima do
+      // outro; a do painel superior é suprimida porque o zero se subentende.
+      callback(v) {
+        if (ocultarMinimo && v === this.min) return '';
+        return Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
+      },
+    },
+    title: { display: true, text: titulo, color: c.suave, font: { ...FONTE, size: 10 } },
+  });
+
+  opcoes.scales = {
+    x: opcoes.scales.x,
+    yNivel: eixoY('Cota (m)', 3),
+    yVert: eixoY('Vertido (m³/s)', 2, true),
+  };
+
+  const nivel = serieLinha('Nível (m)', pontos.map((p) => p.cota), c.nivel);
+  nivel.yAxisID = 'yNivel';
+  const vert = serieLinha('Vertido (m³/s)', pontos.map((p) => p.qvert), c.qdef);
+  vert.yAxisID = 'yVert';
+
+  return criarGrafico(canvasId, {
+    type: 'line',
+    data: { labels: rotularPontos(pontos), datasets: [nivel, vert] },
+    options: opcoes,
   });
 }
