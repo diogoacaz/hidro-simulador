@@ -248,31 +248,46 @@ const pluginRotulosFim = {
     ctx.font = `600 10px ${FONTE.family}`;
     ctx.textBaseline = 'middle';
 
-    const usados = [];
+    // Coleta primeiro e distribui depois: empurrar um rótulo por vez para
+    // baixo encavala tudo quando as séries terminam juntas (duas linhas no
+    // zero, por exemplo) e o último ainda é cortado na borda do gráfico.
+    const rotulos = [];
     chart.data.datasets.forEach((ds, i) => {
       const meta = chart.getDatasetMeta(i);
       if (meta.hidden || !meta.data || !meta.data.length) return;
-      // A linha de cenário (defluente informada) fica só na legenda: três
-      // rótulos no fim de um gráfico estreito se atropelam.
+      // A linha de cenário (defluente informada) fica só na legenda.
       if (ds.semRotuloFim) return;
       const ponto = meta.data[meta.data.length - 1];
       if (!ponto) return;
-      const texto = String(ds.label || '').replace(/\s*\(.*\)\s*$/, '');
-      let py = ponto.y;
-      // Evita sobreposição quando as duas linhas terminam juntas.
-      while (usados.some((u) => Math.abs(u - py) < 13)) py += 13;
-      usados.push(py);
-      py = Math.max(chartArea.top + 7, Math.min(chartArea.bottom - 7, py));
-      // O rótulo mora na folga à direita do plot, nunca sobre a linha.
-      const x = chartArea.right + 7;
-      const larg = ctx.measureText(texto).width;
+      rotulos.push({
+        texto: String(ds.label || '').replace(/\s*\(.*\)\s*$/, ''),
+        cor: ds.borderColor,
+        y: ponto.y,
+      });
+    });
+    if (!rotulos.length) { ctx.restore(); return; }
+
+    const ESPACO = 14;
+    rotulos.sort((a, b) => a.y - b.y);
+    // Separa para baixo…
+    for (let i = 1; i < rotulos.length; i++) {
+      rotulos[i].y = Math.max(rotulos[i].y, rotulos[i - 1].y + ESPACO);
+    }
+    // …e, se o conjunto passou da borda inferior, desloca tudo para cima.
+    const excesso = rotulos[rotulos.length - 1].y - (chartArea.bottom - 7);
+    if (excesso > 0) for (const r of rotulos) r.y -= excesso;
+    for (const r of rotulos) r.y = Math.max(chartArea.top + 7, r.y);
+
+    const x = chartArea.right + 7;
+    for (const r of rotulos) {
+      const larg = ctx.measureText(r.texto).width;
       ctx.fillStyle = opts.superficie;
       ctx.globalAlpha = 0.9;
-      ctx.fillRect(x - 3, py - 8, larg + 6, 16);
+      ctx.fillRect(x - 3, r.y - 8, larg + 6, 16);
       ctx.globalAlpha = 1;
-      ctx.fillStyle = ds.borderColor;
-      ctx.fillText(texto, x, py);
-    });
+      ctx.fillStyle = r.cor;
+      ctx.fillText(r.texto, x, r.y);
+    }
     ctx.restore();
   },
 };
@@ -603,6 +618,43 @@ export function graficoVertimento(canvasId, serie, limiteSemDano) {
     data: {
       labels: rotularPontos(pontos),
       datasets: [serieLinha('Vertido (m³/s)', pontos.map((p) => p.qvert), c.qdef)],
+    },
+    options: opcoes,
+  });
+}
+
+/**
+ * Afluência contra vertimento, no mesmo eixo de tempo e na mesma escala.
+ *
+ * É o gráfico do amortecimento: quanto entra, quanto sai pela comporta, e o
+ * atraso entre os dois picos. Escala única de propósito — a diferença entre
+ * as duas alturas É a informação. Azul × âmbar é o par validado para duas
+ * séries, e a linha de alagamento entra como referência, não como série.
+ */
+export function graficoAfluenteVertimento(canvasId, serie, limiteSemDano) {
+  refazer.set(canvasId, () => graficoAfluenteVertimento(canvasId, serie, limiteSemDano));
+  const pontos = amostrar(serie);
+  const c = cores();
+
+  const opcoes = opcoesBase({
+    titulo: 'Afluência × vertimento', tituloEixoY: 'Vazão (m³/s)', pontos,
+    legenda: true, unidade: 'm³/s',
+  });
+  if (Number.isFinite(limiteSemDano)) {
+    opcoes.plugins.limites = {
+      lista: [{ rotulo: 'início do alagamento', valor: limiteSemDano, cor: c.emergencial }],
+      superficie: c.superficie,
+    };
+  }
+
+  return criarGrafico(canvasId, {
+    type: 'line',
+    data: {
+      labels: rotularPontos(pontos),
+      datasets: [
+        serieLinha('Afluente (m³/s)', pontos.map((p) => p.qaf), c.qaf, { preencher: false }),
+        serieLinha('Vertido (m³/s)', pontos.map((p) => p.qvert), c.qdef),
+      ],
     },
     options: opcoes,
   });

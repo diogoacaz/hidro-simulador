@@ -9,7 +9,7 @@
 import * as db from '../db.js';
 import { limitesCav } from '../cav.js';
 import { amortecerCheia, hidrogramaTriangular, cenariosDeBombeamento } from '../cheia.js';
-import { graficoNivel, graficoVertimento, graficoAfluenteSaida, graficoBombeamento } from '../charts.js';
+import { graficoNivel, graficoAfluenteVertimento, graficoVertimento, graficoAfluenteSaida, graficoBombeamento } from '../charts.js';
 import { $, $$, esc, num, toast, comBotao, valorNumerico, paraInputDateTime } from '../ui.js';
 import { lerListaNumeros } from '../planilha.js';
 
@@ -308,6 +308,7 @@ function htmlSaida({ resumo }, cfg) {
 
       <div class="graficos">
         <div class="grafico-caixa alta"><canvas id="g-cheia-nivel"></canvas></div>
+        <div class="grafico-caixa alta"><canvas id="g-cheia-amort"></canvas></div>
         <div class="graficos-par">
           <div class="grafico-caixa"><canvas id="g-cheia-vert"></canvas></div>
           <div class="grafico-caixa"><canvas id="g-cheia-afl"></canvas></div>
@@ -344,6 +345,7 @@ function desenhar(resultado, cfg) {
   const { serie, resumo } = resultado;
   graficoNivel('g-cheia-nivel', serie,
     { nivelMaxEmergencial: cfg.nivelMaximo, nivelMinEmergencial: cfg.nivelMinimo }, []);
+  graficoAfluenteVertimento('g-cheia-amort', serie, resumo.limiteSemDano);
   graficoVertimento('g-cheia-vert', serie, resumo.limiteSemDano);
   graficoAfluenteSaida('g-cheia-afl', serie);
   graficoBombeamento('g-cheia-bomb', serie);
