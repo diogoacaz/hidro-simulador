@@ -64,13 +64,43 @@ export function textoParaMatriz(texto) {
     .filter((linha) => linha.length);
   if (!linhas.length) return [];
 
-  const amostra = linhas.slice(0, 5).join('\n');
-  const separador = amostra.includes('\t') ? /\t/
-    : amostra.includes(';') ? /;/
-    : /,(?=(?:[^"]*"[^"]*")*[^"]*$)/;
+  const amostra = linhas.slice(0, 5);
+  const texto5 = amostra.join('\n');
 
-  return linhas.map((linha) =>
-    linha.split(separador).map((c) => c.trim().replace(/^"|"$/g, '')));
+  if (texto5.includes('\t')) return dividir(linhas, /\t/);
+  if (texto5.includes(';')) return dividir(linhas, /;/);
+  // Coluna única com decimal em vírgula: dividir por vírgula partiria o
+  // número ao meio e a parte decimal viraria o valor.
+  if (virgulaEhDecimal(amostra)) return linhas.map((l) => [limpar(l)]);
+  return dividir(linhas, /,(?=(?:[^"]*"[^"]*")*[^"]*$)/);
+}
+
+const limpar = (c) => c.trim().replace(/^"|"$/g, '');
+const dividir = (linhas, sep) => linhas.map((l) => l.split(sep).map(limpar));
+
+// Sem tabulação nem ponto-e-vírgula, a vírgula é ambígua: separa valores em
+// "10,20,30" e é decimal em "12,5". A decisão é pelo conjunto — se toda linha
+// que tem vírgula é um número válido lendo-a como decimal, então ela é
+// decimal e o arquivo tem uma coluna só. Um cabeçalho como "data,vazao" ou
+// uma linha "01/01,12,5" reprovam o teste e a vírgula volta a separar.
+function virgulaEhDecimal(amostra) {
+  const comVirgula = amostra.filter((l) => l.includes(','));
+  return comVirgula.length > 0 && comVirgula.every((l) => Number.isFinite(paraNumero(limpar(l))));
+}
+
+/**
+ * Lê uma lista de números de texto livre (colado ou vindo de arquivo).
+ * Separa por espaço, quebra de linha e ponto-e-vírgula — nunca por vírgula,
+ * que em pt-BR é decimal. Só se um item não for número sozinho é que a
+ * vírgula dentro dele passa a separar valores ("10,20,30").
+ */
+export function lerListaNumeros(texto) {
+  return String(texto ?? '')
+    .split(/[\s;]+/)
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .flatMap((t) => (Number.isFinite(paraNumero(t)) ? [paraNumero(t)] : t.split(',').map(paraNumero)))
+    .filter(Number.isFinite);
 }
 
 // Descarta a primeira linha se ela parecer um cabeçalho (nenhuma célula numérica).

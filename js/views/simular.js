@@ -4,7 +4,7 @@
 import * as db from '../db.js';
 import { limitesCav } from '../cav.js';
 import { simular, MODOS, ROTULOS_MODO, formatarDuracao } from '../simulation.js';
-import { lerArquivo, removerCabecalho, paraNumero } from '../planilha.js';
+import { lerArquivo, removerCabecalho, paraNumero, lerListaNumeros } from '../planilha.js';
 import { $, $$, esc, num, toast, comBotao, valorNumerico, paraInputDateTime } from '../ui.js';
 import * as resultadoView from './resultado.js';
 
@@ -205,7 +205,9 @@ export async function render(container) {
         .map((linha) => [...linha].reverse().map(paraNumero).find(Number.isFinite))
         .filter(Number.isFinite);
       if (!valores.length) throw new Error('Nenhum valor numérico encontrado no arquivo.');
-      $(`#${chave}-serie`, bloco).value = valores.join('\n');
+      $(`#${chave}-serie`, bloco).value = valores
+        .map((v) => v.toLocaleString('pt-BR', { maximumFractionDigits: 6, useGrouping: false }))
+        .join('\n');
       atualizarInfoSerie(chave, bloco);
       toast(`${valores.length} valores carregados.`, 'ok');
     } catch (err) {
@@ -337,14 +339,9 @@ function lerEspecificacaoVazao(container, chave) {
   return { tipo: 'serie', serie };
 }
 
-function lerSerie(texto) {
-  return texto
-    .split(/[\s,;]+/)
-    .map((v) => v.trim())
-    .filter(Boolean)
-    .map(paraNumero)
-    .filter(Number.isFinite);
-}
+// A textarea é relida aqui na hora de simular, então uma vírgula tratada como
+// separador duplicaria cada valor pt-BR ("12,5" viraria 12 e 5).
+const lerSerie = (texto) => lerListaNumeros(texto);
 
 function blocoVazao(chave, rotulo) {
   return `
