@@ -81,7 +81,10 @@ export async function render(container) {
           <div class="grade">
             <label>Nível inicial (m)<input type="number" id="nivelInicial" step="0.01" /></label>
             <label>Nível máximo a respeitar (m)<input type="number" id="nivelMaximo" step="0.01" /></label>
-            <label>Nível mínimo de referência (m)<input type="number" id="nivelMinimo" step="0.01" /></label>
+            <label>Nível mínimo de emergência (m)
+              <input type="number" id="nivelMinimo" step="0.01" />
+              <small>Limite, não referência: a retirada é reduzida para o nível parar nele.</small>
+            </label>
           </div>
         </fieldset>
 
@@ -95,9 +98,13 @@ export async function render(container) {
           <div class="grade">
             <label>Capacidade máxima (m³/s)<input type="number" id="vertMax" value="1200" step="10" /></label>
             <label>Limite sem alagar (m³/s)<input type="number" id="vertSemDano" value="30" step="1" /></label>
-            <label>Abertura gradual (m³/s por 15 min)
-              <input type="number" id="vertRampa" value="5" step="any" min="0.1" />
-              <small>Quanto a comporta pode variar a cada passo, para não gerar onda.</small>
+            <label>Degrau de manobra (m³/s)
+              <input type="number" id="vertDegrau" value="10" step="any" min="0.1" />
+              <small>Quanto a comporta abre ou fecha de uma vez.</small>
+            </label>
+            <label>A cada (passos de 15 min)
+              <input type="number" id="vertPassos" value="2" step="1" min="1" />
+              <small id="info-rampa"></small>
             </label>
           </div>
         </fieldset>
@@ -136,6 +143,16 @@ export async function render(container) {
     $('#caixa-triangular', container).classList.toggle('oculto', serie);
     $('#caixa-serie', container).classList.toggle('oculto', !serie);
   }));
+  const atualizarRampa = () => {
+    const d = Number($('#vertDegrau', container).value) || 0;
+    const p = Math.max(1, Number($('#vertPassos', container).value) || 1);
+    $('#info-rampa', container).textContent =
+      `${num(d)} m³/s a cada ${p * 15} min · equivale a ${num(d / p)} m³/s por passo`;
+  };
+  $('#vertDegrau', container).addEventListener('input', atualizarRampa);
+  $('#vertPassos', container).addEventListener('input', atualizarRampa);
+  atualizarRampa();
+
   $('#serieQaf', container).addEventListener('input', () => {
     const v = lerListaNumeros($('#serieQaf', container).value);
     $('#info-serie', container).textContent = v.length
@@ -217,7 +234,8 @@ function montarConfig(container, estado) {
     vertedouro: {
       capacidadeMax: Number($('#vertMax', container).value) || 0,
       limiteSemDano: Number($('#vertSemDano', container).value),
-      rampa: Number($('#vertRampa', container).value) || 1,
+      degrau: Number($('#vertDegrau', container).value) || 1,
+      passosPorDegrau: Number($('#vertPassos', container).value) || 1,
     },
     dataInicial: new Date($('#dataInicial', container).value || Date.now()),
   };
@@ -254,7 +272,8 @@ function htmlSaida({ resumo }, cfg) {
           ${resumo.precisaVerter ? `<span class="situacao-contagem">abrir a comporta a partir de ${hora(resumo.inicioAbertura)}</span>` : ''}
         </div>
         ${resumo.estourouTeto ? `<p class="situacao-tipos"><strong>O nível ultrapassa o teto de ${num(resumo.nivelMaximo)} m</strong> em ${num(resumo.excedenteSobreTeto, 3)} hm³: os recursos informados não seguram esta cheia.</p>` : ''}
-        ${resumo.rampaInsuficiente ? '<p class="situacao-tipos"><strong>A taxa de abertura não acompanha.</strong> A comporta precisaria abrir mais rápido do que o informado para conter o nível.</p>' : ''}
+        ${resumo.rampaInsuficiente ? '<p class="situacao-tipos"><strong>O degrau de manobra não acompanha.</strong> A comporta precisaria abrir mais rápido do que o informado para conter o nível.</p>' : ''}
+        ${resumo.seguraOPiso ? '' : `<p class="situacao-tipos"><strong>O nível fura o mínimo de ${num(resumo.nivelMinimo)} m</strong> mesmo com a retirada zerada: a afluência não repõe o que sai.</p>`}
       </div>
 
       <div class="metricas">
@@ -276,6 +295,14 @@ function htmlSaida({ resumo }, cfg) {
         ${grupo('Bombeamento', [
     item('Volume bombeado', `${num(resumo.volumeBombeado, 2)} hm³`),
     item('Capacidade na cota', `${num(resumo.bombeamentoMinimo)} a ${num(resumo.bombeamentoMaximo)} m³/s`),
+    resumo.passosComRetiradaReduzida
+      ? item('Retirada reduzida', `${resumo.passosComRetiradaReduzida} passos, para não furar o mínimo`)
+      : '',
+  ].filter(Boolean))}
+        ${grupo('Manobra da comporta', [
+    item('Degrau', `${num(resumo.degrau)} m³/s a cada ${resumo.minutosPorDegrau} min`),
+    item('Manobras no evento', `${resumo.manobras}`),
+    item('Taxa equivalente', `${num(resumo.rampaPorPasso)} m³/s por passo`),
   ])}
       </div>
 

@@ -57,28 +57,45 @@ export function hidrogramaTriangular({ base = 0, pico, horasSubida, horasRecessa
   return serie;
 }
 
+/**
+ * Retirada possível num passo sem furar o piso de operação.
+ *
+ * O mínimo de emergência é limite, não referência: a retirada é reduzida
+ * para o nível parar nele. O bombeamento tem prioridade sobre o vertimento,
+ * porque é o vertimento que se quer evitar — se algo precisa ceder, cede o
+ * que alaga.
+ */
+function repartirSaida(disponivelBomba, vertProgramado, volume, qaf, volumePiso) {
+  const saidaMax = Math.max(0, (volume - volumePiso) / HM3_POR_M3S + qaf);
+  const qb = Math.min(disponivelBomba, saidaMax);
+  const qv = Math.min(vertProgramado, Math.max(0, saidaMax - qb));
+  return { qb, qv, contido: qb < disponivelBomba - 1e-9 || qv < vertProgramado - 1e-9 };
+}
+
 // Simula o reservatório com um cronograma de vertimento já definido.
-function simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volumeMinCav, volumeMaxCav) {
+function simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volumePiso) {
   const n = hidrograma.length;
   const volumes = new Array(n + 1);
   const bombeado = new Array(n);
+  const vertido = new Array(n);
+  const reduzido = new Array(n);
   volumes[0] = volumeInicial;
 
   for (let t = 0; t < n; t++) {
     const cota = cotaDoVolume(cav, volumes[t]);
-    const qb = Math.min(
-      bombeamentoNaCota(conjuntos, cota),
-      // Não se bombeia mais água do que existe acima do fundo da CAV.
-      Math.max(0, (volumes[t] - volumeMinCav) / HM3_POR_M3S + hidrograma[t]),
+    const { qb, qv, contido } = repartirSaida(
+      bombeamentoNaCota(conjuntos, cota), vertimento[t], volumes[t], hidrograma[t], volumePiso,
     );
     bombeado[t] = qb;
+    vertido[t] = qv;
+    reduzido[t] = contido;
     // Sem saturar no topo: é justamente a ultrapassagem que precisa ficar
     // visível, porque é ela que determina quanto verter. Saturar aqui faria
     // o excesso ser descartado em silêncio e o algoritmo concluiria que não
     // havia o que verter.
-    volumes[t + 1] = Math.max(volumes[t] + (hidrograma[t] - qb - vertimento[t]) * HM3_POR_M3S, volumeMinCav);
+    volumes[t + 1] = volumes[t] + (hidrograma[t] - qb - qv) * HM3_POR_M3S;
   }
-  return { volumes, bombeado };
+  return { volumes, bombeado, vertido, reduzido };
 }
 
 /**
@@ -104,38 +121,65 @@ function simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volum
  * excesso de zelo. Se a passada para a frente não conseguir acompanhar o que
  * a de trás pediu, a rampa é insuficiente para esta cheia — e isso é dito.
  */
-function requisitoSemRampa(cav, hidrograma, volumeInicial, conjuntos, volumeTeto, volumeMinCav, capacidadeMax) {
+function requisitoSemRampa(cav, hidrograma, volumeInicial, conjuntos, volumeTeto, volumePiso, capacidadeMax) {
   const n = hidrograma.length;
   const q = new Array(n).fill(0);
   let volume = volumeInicial;
   for (let t = 0; t < n; t++) {
     const cota = cotaDoVolume(cav, volume);
-    const qb = Math.min(
-      bombeamentoNaCota(conjuntos, cota),
-      Math.max(0, (volume - volumeMinCav) / HM3_POR_M3S + hidrograma[t]),
+    const necessario = Math.max(
+      0,
+      (volume - volumeTeto) / HM3_POR_M3S + hidrograma[t] - bombeamentoNaCota(conjuntos, cota),
     );
-    const necessario = Math.max(0, (volume - volumeTeto) / HM3_POR_M3S + hidrograma[t] - qb);
-    q[t] = Math.min(necessario, capacidadeMax);
-    volume = Math.max(volume + (hidrograma[t] - qb - q[t]) * HM3_POR_M3S, volumeMinCav);
+    const { qb, qv } = repartirSaida(
+      bombeamentoNaCota(conjuntos, cota), Math.min(necessario, capacidadeMax),
+      volume, hidrograma[t], volumePiso,
+    );
+    q[t] = qv;
+    volume += (hidrograma[t] - qb - qv) * HM3_POR_M3S;
   }
   return q;
 }
 
-function envelopeDeRampa(necessario, rampa, capacidadeMax) {
+/**
+ * A manobra é um degrau: a comporta varia `degrau` m³/s e fica parada por
+ * `passosPorDegrau` passos de 15 min. É assim que a abertura é comandada na
+ * prática — "abro 10 m³/s a cada meia hora" —, e é o tamanho do degrau, não
+ * uma taxa média, que determina a onda a jusante.
+ *
+ * Por isso o envelope é calculado na grade grossa dos degraus: o necessário
+ * de cada bloco é o maior do bloco, a antecipação recua um degrau por bloco,
+ * e o resultado é expandido de volta para a grade de 15 min como patamares.
+ */
+function envelopeDeRampa(necessario, degrau, passosPorDegrau, capacidadeMax) {
   const n = necessario.length;
-  const env = necessario.slice();
-  for (let t = n - 2; t >= 0; t--) env[t] = Math.max(env[t], env[t + 1] - rampa);
+  const porBloco = Math.max(1, Math.round(passosPorDegrau));
+  const nBlocos = Math.ceil(n / porBloco);
 
+  const bloco = new Array(nBlocos).fill(0);
+  for (let t = 0; t < n; t++) {
+    const b = Math.floor(t / porBloco);
+    bloco[b] = Math.max(bloco[b], necessario[t]);
+  }
+
+  // Antecipação: para estar em Q num bloco, é preciso já estar em Q − degrau
+  // no bloco anterior.
+  for (let b = nBlocos - 2; b >= 0; b--) bloco[b] = Math.max(bloco[b], bloco[b + 1] - degrau);
+
+  // Abertura e fechamento, partindo da comporta fechada.
   let anterior = 0;
   let rampaInsuficiente = false;
-  for (let t = 0; t < n; t++) {
-    const pedido = env[t];
-    env[t] = Math.min(Math.max(pedido, anterior - rampa), anterior + rampa);
-    env[t] = Math.min(Math.max(env[t], 0), capacidadeMax);
-    if (pedido > env[t] + 1e-9) rampaInsuficiente = true;
-    anterior = env[t];
+  for (let b = 0; b < nBlocos; b++) {
+    const pedido = bloco[b];
+    bloco[b] = Math.min(Math.max(pedido, anterior - degrau), anterior + degrau);
+    bloco[b] = Math.min(Math.max(bloco[b], 0), capacidadeMax);
+    if (pedido > bloco[b] + 1e-9) rampaInsuficiente = true;
+    anterior = bloco[b];
   }
-  return { envelope: env, rampaInsuficiente };
+
+  const envelope = new Array(n);
+  for (let t = 0; t < n; t++) envelope[t] = bloco[Math.floor(t / porBloco)];
+  return { envelope, rampaInsuficiente, degraus: bloco, porBloco };
 }
 
 export function amortecerCheia(cfg) {
@@ -150,27 +194,46 @@ export function amortecerCheia(cfg) {
     dataInicial = new Date(),
   } = cfg;
 
-  const rampa = Math.max(0.0001, Number(vertedouro.rampa) || 0.0001);      // m³/s por passo
+  const degrau = Math.max(0.0001, Number(vertedouro.degrau) || 0.0001);           // m³/s por manobra
+  const passosPorDegrau = Math.max(1, Math.round(Number(vertedouro.passosPorDegrau) || 1));
   const capacidadeMax = Math.max(0, Number(vertedouro.capacidadeMax) || 0);
   const limiteSemDano = Number(vertedouro.limiteSemDano);
 
   const { volumeMin: volumeMinCav, volumeMax: volumeMaxCav } = limitesCav(cav);
   const volumeInicial = volumeDaCota(cav, nivelInicial);
   const volumeTeto = Math.min(volumeDaCota(cav, nivelMaximo), volumeMaxCav);
+  // O mínimo de emergência é piso de operação: a retirada cede para o nível
+  // parar nele, em vez de atravessá-lo.
+  const volumePiso = Number.isFinite(nivelMinimo)
+    ? Math.max(volumeDaCota(cav, nivelMinimo), volumeMinCav)
+    : volumeMinCav;
 
   const necessario = requisitoSemRampa(
-    cav, hidrograma, volumeInicial, conjuntos, volumeTeto, volumeMinCav, capacidadeMax,
+    cav, hidrograma, volumeInicial, conjuntos, volumeTeto, volumePiso, capacidadeMax,
   );
-  const { envelope: vertimento, rampaInsuficiente } = envelopeDeRampa(necessario, rampa, capacidadeMax);
-  const estado = simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volumeMinCav, volumeMaxCav);
+  const { envelope: vertimento, rampaInsuficiente, degraus } =
+    envelopeDeRampa(necessario, degrau, passosPorDegrau, capacidadeMax);
+  const estado = simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volumePiso);
 
   return montar({
-    cav, hidrograma, vertimento, estado, dataInicial, necessario, rampaInsuficiente,
-    nivelMaximo, nivelMinimo, limiteSemDano, capacidadeMax, rampa, conjuntos,
+    cav, hidrograma, vertimento: estado.vertido, estado, dataInicial, necessario, rampaInsuficiente,
+    nivelMaximo, nivelMinimo, limiteSemDano, capacidadeMax, degrau, passosPorDegrau, degraus, conjuntos,
   });
 }
 
-function montar({ cav, hidrograma, vertimento, estado, dataInicial, necessario, rampaInsuficiente, nivelMaximo, nivelMinimo, limiteSemDano, capacidadeMax, rampa, conjuntos }) {
+// Quantas vezes a comporta precisa ser efetivamente manobrada.
+function contarManobras(degraus) {
+  if (!degraus || !degraus.length) return 0;
+  let n = 0;
+  let anterior = 0;
+  for (const v of degraus) {
+    if (Math.abs(v - anterior) > 1e-9) n += 1;
+    anterior = v;
+  }
+  return n;
+}
+
+function montar({ cav, hidrograma, vertimento, estado, dataInicial, necessario, rampaInsuficiente, nivelMaximo, nivelMinimo, limiteSemDano, capacidadeMax, degrau, passosPorDegrau, degraus, conjuntos }) {
   const n = hidrograma.length;
   const serie = [];
   for (let t = 0; t <= n; t++) {
@@ -184,6 +247,7 @@ function montar({ cav, hidrograma, vertimento, estado, dataInicial, necessario, 
       qbomb: estado.bombeado[i],
       qvert: vertimento[i],
       qsaida: estado.bombeado[i] + vertimento[i],
+      retiradaReduzida: !!estado.reduzido[i],
       volume,
       cota,
       area: areaDaCota(cav, cota),
@@ -239,8 +303,16 @@ function montar({ cav, hidrograma, vertimento, estado, dataInicial, necessario, 
       volumeTeto,
       excedenteSobreTeto: Math.max(0, volumeMaximo - volumeTeto),
       naCapacidadeMaxima: naCapacidade,
-      rampa,
+      degrau,
+      passosPorDegrau,
+      minutosPorDegrau: (passosPorDegrau * PASSO_SEGUNDOS) / 60,
+      rampaPorPasso: degrau / passosPorDegrau,
+      manobras: contarManobras(degraus),
       rampaInsuficiente,
+      passosComRetiradaReduzida: estado.reduzido.filter(Boolean).length,
+      seguraOPiso: Number.isFinite(nivelMinimo)
+        ? Math.min(...estado.volumes) >= volumeDaCota(cav, nivelMinimo) - 1e-9
+        : true,
       picoSemRampa: Math.max(0, ...necessario),
       qafPico: Math.max(...hidrograma),
       volumeAfluente: hidrograma.reduce((s, q) => s + q * HM3_POR_M3S, 0),
