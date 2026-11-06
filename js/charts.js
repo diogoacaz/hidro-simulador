@@ -27,21 +27,24 @@ function varCss(nome, alternativa) {
 function cores() {
   const escuro = matchMedia('(prefers-color-scheme: dark)').matches;
   return {
-    nivel: varCss('--acento', '#2563eb'),
-    volume: escuro ? '#2dd4bf' : '#0d9488',
-    qaf: escuro ? '#60a5fa' : '#0284c7',
-    qdef: varCss('--atencao', '#d97706'),
-    operacional: varCss('--texto-suave', '#8b8b93'),
-    emergencial: varCss('--critico', '#dc2626'),
-    restricao: varCss('--restricao', '#9333ea'),
-    texto: varCss('--texto-medio', '#52525b'),
-    suave: varCss('--texto-suave', '#8b8b93'),
-    grade: varCss('--linha', '#e8e8ea'),
-    superficie: varCss('--superficie', '#ffffff'),
+    // A marca usa lime como preenchimento, nao como tinta: sobre fundo
+    // claro ele some (1,19:1). A serie principal segue --acento-tinta,
+    // que e verde-petroleo no tema claro e lime no escuro.
+    nivel: varCss('--acento-tinta', escuro ? '#c3ff24' : '#1f6b57'),
+    volume: escuro ? '#22d3ee' : '#0e7490',
+    qaf: escuro ? '#60a5fa' : '#1d4ed8',
+    qdef: varCss('--atencao', escuro ? '#fbbf24' : '#b45309'),
+    operacional: varCss('--texto-suave', escuro ? '#8aa39c' : '#5a6e67'),
+    emergencial: varCss('--critico', escuro ? '#f87171' : '#dc2626'),
+    restricao: varCss('--restricao', escuro ? '#c084fc' : '#9333ea'),
+    texto: varCss('--texto-medio', escuro ? '#b9ccc6' : '#4a635b'),
+    suave: varCss('--texto-suave', escuro ? '#8aa39c' : '#5a6e67'),
+    grade: varCss('--linha', escuro ? '#245046' : '#dfe5dd'),
+    superficie: varCss('--superficie', escuro ? '#14332d' : '#ffffff'),
     violacao: {
-      critico: varCss('--critico', '#dc2626'),
-      restricao: varCss('--restricao', '#9333ea'),
-      atencao: varCss('--atencao', '#d97706'),
+      critico: varCss('--critico', escuro ? '#f87171' : '#dc2626'),
+      restricao: varCss('--restricao', escuro ? '#c084fc' : '#9333ea'),
+      atencao: varCss('--atencao', escuro ? '#fbbf24' : '#b45309'),
     },
   };
 }

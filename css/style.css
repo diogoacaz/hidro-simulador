@@ -1,27 +1,46 @@
-/* Design minimalista: base neutra, cor reservada para significado
+/* Padrão visual institucional Light Geração.
+   O template opera com duas cores em papéis recíprocos: o lime é
+   PREENCHIMENTO (fundo de painel claro) e o verde-petróleo é TINTA
+   (texto sobre o lime) — invertendo-se no painel escuro, onde o lime
+   vira título e o petróleo vira fundo. Os tokens abaixo preservam essa
+   dualidade: --acento é sempre preenchimento, --acento-tinta é sempre
+   a cor legível sobre superfície clara, e --sobre-acento é o que se
+   escreve em cima do lime. Cor saturada segue reservada a significado
    (ação primária e severidade de violação). */
 
 :root {
   color-scheme: light;
 
-  --canvas: #f7f7f8;
+  /* Marca */
+  --lime: #c3ff24;
+  --petroleo: #14332d;
+
+  --canvas: #f2f5f2;
   --superficie: #ffffff;
-  --sutil: #f4f4f5;
-  --linha: #e8e8ea;
-  --linha-forte: #d9d9dd;
+  --sutil: #eef2ed;
+  --linha: #dfe5dd;
+  --linha-forte: #c8d1c6;
 
-  --texto: #18181b;
-  --texto-medio: #52525b;
-  --texto-suave: #8b8b93;
+  --texto: #14332d;
+  --texto-medio: #4a635b;
+  --texto-suave: #5a6e67;
 
-  --acento: #2563eb;
-  --acento-hover: #1d4ed8;
-  --acento-suave: rgba(37, 99, 235, 0.08);
+  --acento: #c3ff24;
+  --acento-hover: #b2f000;
+  --acento-tinta: #1f6b57;
+  --sobre-acento: #14332d;
+  --acento-suave: rgba(195, 255, 36, 0.20);
+
+  /* Barra superior: petróleo nos dois temas, como no template. */
+  --topo-fundo: #14332d;
+  --topo-texto: #ffffff;
+  --topo-suave: #8fa8a1;
+  --topo-sutil: rgba(255, 255, 255, 0.09);
 
   --critico: #dc2626;
   --restricao: #9333ea;
-  --atencao: #d97706;
-  --ok: #059669;
+  --atencao: #b45309;
+  --ok: #047857;
 
   --raio: 12px;
   --raio-p: 8px;
@@ -32,19 +51,26 @@
   :root {
     color-scheme: dark;
 
-    --canvas: #0a0a0b;
-    --superficie: #141416;
-    --sutil: #1c1c1f;
-    --linha: #26262a;
-    --linha-forte: #35353b;
+    --canvas: #0d201c;
+    --superficie: #14332d;
+    --sutil: #1b3f37;
+    --linha: #245046;
+    --linha-forte: #336055;
 
-    --texto: #f4f4f5;
-    --texto-medio: #b4b4bb;
-    --texto-suave: #82828b;
+    --texto: #ffffff;
+    --texto-medio: #b9ccc6;
+    --texto-suave: #8aa39c;
 
-    --acento: #5b8bff;
-    --acento-hover: #7ba2ff;
-    --acento-suave: rgba(91, 139, 255, 0.14);
+    --acento: #c3ff24;
+    --acento-hover: #d4ff5c;
+    --acento-tinta: #c3ff24;
+    --sobre-acento: #14332d;
+    --acento-suave: rgba(195, 255, 36, 0.14);
+
+    --topo-fundo: #0a1a16;
+    --topo-texto: #ffffff;
+    --topo-suave: #8fa8a1;
+    --topo-sutil: rgba(255, 255, 255, 0.07);
 
     --critico: #f87171;
     --restricao: #c084fc;
@@ -59,7 +85,7 @@ body {
   margin: 0;
   background: var(--canvas);
   color: var(--texto);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: "Segoe UI", Arial, Helvetica, ui-sans-serif, system-ui, sans-serif;
   font-size: 15px;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
@@ -77,9 +103,10 @@ body {
   gap: 28px;
   padding: 0 28px;
   height: 60px;
-  background: color-mix(in srgb, var(--superficie) 85%, transparent);
+  color: var(--topo-texto);
+  background: color-mix(in srgb, var(--topo-fundo) 92%, transparent);
   backdrop-filter: saturate(180%) blur(12px);
-  border-bottom: 1px solid var(--linha);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .topo-marca { display: flex; align-items: center; gap: 11px; min-width: 0; }
@@ -92,7 +119,7 @@ body {
   background: var(--acento);
   display: grid;
   place-items: center;
-  color: #fff;
+  color: var(--sobre-acento);
 }
 
 .topo h1 {
@@ -106,7 +133,7 @@ body {
 .subtitulo {
   margin: 0;
   font-size: 0.78rem;
-  color: var(--texto-suave);
+  color: var(--topo-suave);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -118,7 +145,7 @@ body {
 .abas a {
   padding: 6px 13px;
   border-radius: 999px;
-  color: var(--texto-suave);
+  color: var(--topo-suave);
   text-decoration: none;
   font-size: 0.86rem;
   font-weight: 500;
@@ -126,8 +153,8 @@ body {
   transition: color var(--transicao), background var(--transicao);
 }
 
-.abas a:hover { color: var(--texto); background: var(--sutil); }
-.abas a.ativa { color: var(--texto); background: var(--sutil); font-weight: 600; }
+.abas a:hover { color: var(--topo-texto); background: var(--topo-sutil); }
+.abas a.ativa { color: var(--lime); background: var(--topo-sutil); font-weight: 600; }
 
 /* ---------- Layout ---------- */
 
@@ -182,6 +209,16 @@ body {
 .cabecalho-painel h2 { margin: 0; font-size: 0.98rem; font-weight: 600; }
 .cabecalho-painel .ajuda { margin: 4px 0 0; }
 
+/* O template titula em caixa alta pesada; os painéis repetem essa voz,
+   em petróleo (o lime não tem contraste sobre superfície clara). */
+.painel > h2,
+.cabecalho-painel h2 {
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
 /* ---------- Formulários ---------- */
 
 .grade {
@@ -224,11 +261,11 @@ input::placeholder, textarea::placeholder { color: var(--texto-suave); }
 
 input:focus, select:focus, textarea:focus {
   outline: none;
-  border-color: var(--acento);
+  border-color: var(--acento-tinta);
   box-shadow: 0 0 0 3px var(--acento-suave);
 }
 
-input[type="radio"] { width: auto; accent-color: var(--acento); }
+input[type="radio"] { width: auto; accent-color: var(--acento-tinta); }
 
 input[type="file"] {
   padding: 8px;
@@ -256,8 +293,10 @@ fieldset {
 legend {
   padding: 0;
   margin-bottom: 14px;
-  font-size: 0.78rem;
-  font-weight: 600;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
   color: var(--texto-medio);
 }
 
@@ -285,17 +324,13 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--acento-suave); }
 
 button.primario {
-  color: #fff;
+  color: var(--sobre-acento);
   background: var(--acento);
   border-color: transparent;
   font-weight: 600;
 }
 
 button.primario:hover:not(:disabled) { background: var(--acento-hover); }
-
-@media (prefers-color-scheme: dark) {
-  button.primario { color: #0a0a0b; }
-}
 
 button.perigo { color: var(--critico); border-color: var(--linha-forte); }
 button.perigo:hover:not(:disabled) {
@@ -345,8 +380,10 @@ th {
   z-index: 1;
   padding: 9px 12px;
   text-align: left;
-  font-size: 0.76rem;
-  font-weight: 500;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
   color: var(--texto-suave);
   white-space: nowrap;
   background: var(--superficie);
@@ -417,10 +454,10 @@ tr.violacao-atencao td { background: color-mix(in srgb, var(--atencao) 7%, trans
 
 .cartao.destaque {
   background: var(--acento-suave);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--acento) 22%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--acento-tinta) 30%, transparent);
 }
 
-.cartao.destaque span { color: var(--acento); font-weight: 500; }
+.cartao.destaque span { color: var(--acento-tinta); font-weight: 600; }
 .cartao.destaque strong { font-size: 1.2rem; }
 
 /* ---------- Badges, alertas ---------- */
@@ -457,7 +494,7 @@ tr.violacao-atencao td { background: color-mix(in srgb, var(--atencao) 7%, trans
 }
 
 .alerta-info {
-  border-left-color: var(--acento);
+  border-left-color: var(--acento-tinta);
   background: var(--acento-suave);
 }
 
@@ -573,7 +610,7 @@ a { color: inherit; text-decoration: none; }
 .toast-ok { color: #fff; background: var(--ok); }
 
 @media (prefers-color-scheme: dark) {
-  .toast-erro, .toast-ok { color: #0a0a0b; }
+  .toast-erro, .toast-ok { color: var(--petroleo); }
 }
 
 /* ---------- Responsivo ---------- */
