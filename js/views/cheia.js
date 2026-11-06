@@ -20,38 +20,74 @@ const PADRAO_CONJUNTOS = [
 
 const hora = (iso) => (iso ? new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '—');
 
+const RESERVATORIO_ALVO = 'santana';
+
+// A aba é só para Santana. O seletor sai do caminho: o reservatório é
+// escolhido por nome, e só vira pergunta se não for encontrado.
+function escolherReservatorio(lista) {
+  const normal = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  return lista.find((r) => normal(r.nome).includes(RESERVATORIO_ALVO))
+    || lista.find((r) => normal(r.nome).includes('sanatana'))
+    || lista[0];
+}
+
+// O nível mínimo de captação da elevatória já está no cadastro como
+// restrição de mínimo; usá-lo evita um número repetido em dois lugares.
+function nivelDeCaptacao(reservatorio) {
+  const mins = (reservatorio?.restricoes || [])
+    .filter((r) => r.tipo === 'min' && Number.isFinite(r.nivel))
+    .map((r) => r.nivel);
+  return mins.length ? Math.max(...mins) : null;
+}
+
 export async function render(container) {
   const reservatorios = (await db.listarReservatorios()).filter((r) => r.cavResumo);
+  const reservatorio = escolherReservatorio(reservatorios);
+  const cav = reservatorio ? await db.obterCav(reservatorio.id) : null;
+
+  const teto = reservatorio?.nivelMaxEmergencial;
+  const piso = reservatorio?.nivelMinEmergencial;
+  const faltamLimites = !Number.isFinite(teto) || !Number.isFinite(piso);
+  const pronto = !!cav && !faltamLimites;
+
+  const l = cav ? limitesCav(cav) : null;
+  const captacao = nivelDeCaptacao(reservatorio);
+  const conjuntos = PADRAO_CONJUNTOS.map((c, i) => ({
+    ...c,
+    nivelMinimo: i === 0 && Number.isFinite(captacao) ? captacao : c.nivelMinimo,
+  }));
+
+  const inicialPadrao = Number.isFinite(reservatorio?.nivelMaxOperacional)
+    ? reservatorio.nivelMaxOperacional
+    : (Number.isFinite(teto) && Number.isFinite(piso) ? (teto + piso) / 2 : l ? (l.cotaMin + l.cotaMax) / 2 : 0);
 
   container.innerHTML = `
     <section class="painel">
       <div class="cabecalho-painel">
         <div>
           <h2>Amortecimento de cheia</h2>
-          <p class="ajuda">Calcula se será necessário verter, qual o pico e a partir de que hora a comporta
-          precisa começar a abrir — respeitando a abertura gradual.</p>
+          <p class="ajuda">${reservatorio
+    ? `${esc(reservatorio.nome)}${reservatorio.usinaNome ? ` · ${esc(reservatorio.usinaNome)}` : ''} — calcula se será necessário verter, qual o pico e a partir de que hora a comporta precisa começar a abrir.`
+    : 'Nenhum reservatório com tabela CAV importada.'}</p>
         </div>
       </div>
 
-      ${reservatorios.length ? '' : '<div class="alerta alerta-aviso">Nenhum reservatório com tabela CAV importada.</div>'}
+      ${pronto ? `
+      <div class="referencias">
+        <div class="referencia"><span>Teto — máx. emergencial</span><strong>${num(teto)} m</strong></div>
+        <div class="referencia"><span>Piso — mín. emergencial</span><strong>${num(piso)} m</strong></div>
+        <div class="referencia"><span>Faixa da CAV</span><strong>${num(l.cotaMin)} a ${num(l.cotaMax)} m</strong></div>
+        <div class="referencia"><span>Volume útil</span><strong>${num(l.volumeMax - l.volumeMin, 3)} hm³</strong></div>
+        <p class="referencias-origem">Valores do cadastro do reservatório. <a href="#/reservatorios">Ajustar</a></p>
+      </div>` : ''}
 
-      <!-- novalidate pela mesma razão do formulário de simulação: um campo
-           inválido (inclusive escondido, ou fora da grade de step) cancela o
-           submit sem o navegador conseguir mostrar a mensagem. A validação de
-           montarConfig cobre os casos com mensagem melhor. -->
+      ${!cav ? '<div class="alerta alerta-aviso">Importe a tabela CAV do reservatório antes de simular a cheia.</div>' : ''}
+      ${cav && faltamLimites ? `<div class="alerta alerta-aviso">
+        <strong>Faltam os níveis de emergência no cadastro.</strong> O amortecimento precisa de um teto e de um piso
+        para calcular o vertimento, e eles vêm do cadastro do reservatório — não são informados aqui.
+        <a href="#/reservatorios">Cadastrar agora</a>.</div>` : ''}
+
       <form id="form-cheia" novalidate>
-        <div class="grade grade-2">
-          <label>Reservatório
-            <select id="reservatorio" ${reservatorios.length ? '' : 'disabled'}>
-              ${reservatorios.map((r) => `<option value="${r.id}">${esc(r.nome)}${r.usinaNome ? ` — ${esc(r.usinaNome)}` : ''}</option>`).join('')}
-            </select>
-          </label>
-          <label>Início do evento
-            <input type="datetime-local" id="dataInicial" />
-          </label>
-        </div>
-        <p class="ajuda" id="info-cav"></p>
-
         <fieldset>
           <legend>Cheia de projeto</legend>
           <div class="linha-inline" style="margin-bottom:12px">
@@ -62,7 +98,7 @@ export async function render(container) {
               <input type="radio" name="fonte" value="serie" style="width:auto" /> Série medida
             </label>
           </div>
-          <div class="grade" id="caixa-triangular">
+          <div class="grade grade-3" id="caixa-triangular">
             <label>Vazão de base (m³/s)<input type="number" id="qBase" value="2" step="0.1" /></label>
             <label>Pico (m³/s)<input type="number" id="qPico" value="600" step="1" /></label>
             <label>Subida (h)<input type="number" id="hSubida" value="8" step="0.25" /></label>
@@ -77,28 +113,32 @@ export async function render(container) {
         </fieldset>
 
         <fieldset>
-          <legend>Reservatório na partida</legend>
-          <div class="grade">
-            <label>Nível inicial (m)<input type="number" id="nivelInicial" step="0.01" /></label>
-            <label>Nível máximo a respeitar (m)<input type="number" id="nivelMaximo" step="0.01" /></label>
-            <label>Nível mínimo de emergência (m)
-              <input type="number" id="nivelMinimo" step="0.01" />
-              <small>Limite, não referência: a retirada é reduzida para o nível parar nele.</small>
+          <legend>Partida</legend>
+          <div class="grade grade-2">
+            <label>Cota ao início do evento (m)
+              <input type="number" id="nivelInicial" step="0.01" value="${Number(inicialPadrao).toFixed(2)}" />
+              <small>Entre o piso e o teto do cadastro. A tabela ao fim mostra o efeito de partir mais baixo.</small>
+            </label>
+            <label>Início do evento
+              <input type="datetime-local" id="dataInicial" />
+              <small>Usado para datar o cronograma de manobra.</small>
             </label>
           </div>
         </fieldset>
 
         <fieldset>
-          <legend>Bombeamento</legend>
-          <div id="conjuntos"></div>
+          <legend>Bombeamento disponível agora</legend>
+          <div id="conjuntos">${conjuntos.map(blocoConjunto).join('')}</div>
+          <details class="ajuste-fino">
+            <summary>Ajustar características dos conjuntos</summary>
+            <div id="conjuntos-fino">${conjuntos.map(blocoConjuntoFino).join('')}</div>
+          </details>
         </fieldset>
 
         <fieldset>
-          <legend>Vertedouro</legend>
+          <legend>Manobra da comporta</legend>
           <div class="grade">
-            <label>Capacidade máxima (m³/s)<input type="number" id="vertMax" value="1200" step="10" /></label>
-            <label>Limite sem alagar (m³/s)<input type="number" id="vertSemDano" value="30" step="1" /></label>
-            <label>Degrau de manobra (m³/s)
+            <label>Degrau (m³/s)
               <input type="number" id="vertDegrau" value="10" step="any" min="0.1" />
               <small>Quanto a comporta abre ou fecha de uma vez.</small>
             </label>
@@ -107,10 +147,20 @@ export async function render(container) {
               <small id="info-rampa"></small>
             </label>
           </div>
+          <details class="ajuste-fino">
+            <summary>Características do vertedouro</summary>
+            <div class="grade">
+              <label>Capacidade máxima (m³/s)<input type="number" id="vertMax" value="1200" step="10" /></label>
+              <label>Limite sem alagar (m³/s)
+                <input type="number" id="vertSemDano" value="30" step="1" />
+                <small>Acima disto começa a alagar residências ribeirinhas.</small>
+              </label>
+            </div>
+          </details>
         </fieldset>
 
         <div class="acoes">
-          <button type="submit" class="primario" ${reservatorios.length ? '' : 'disabled'}>Calcular amortecimento</button>
+          <button type="submit" class="primario" ${pronto ? '' : 'disabled'}>Calcular amortecimento</button>
         </div>
       </form>
     </section>
@@ -118,31 +168,21 @@ export async function render(container) {
     <div id="saida" class="oculto"></div>`;
 
   $('#dataInicial', container).value = paraInputDateTime(new Date());
-  renderConjuntos(container);
 
-  const estado = { cav: null, reservatorio: null };
+  const estado = { cav, reservatorio, teto, piso };
 
-  const carregar = async () => {
-    const id = $('#reservatorio', container).value;
-    if (!id) return;
-    estado.reservatorio = reservatorios.find((r) => r.id === id);
-    estado.cav = await db.obterCav(id);
-    if (!estado.cav) { $('#info-cav', container).innerHTML = '<span class="erro">Sem tabela CAV.</span>'; return; }
-    const l = limitesCav(estado.cav);
-    $('#info-cav', container).innerHTML =
-      `Faixa da CAV: <strong>${num(l.cotaMin)} m</strong> a <strong>${num(l.cotaMax)} m</strong> · volume útil <strong>${num(l.volumeMax - l.volumeMin, 3)} hm³</strong>`;
-    const r = estado.reservatorio;
-    defineSeVazio($('#nivelMaximo', container), r.nivelMaxEmergencial ?? l.cotaMax);
-    defineSeVazio($('#nivelMinimo', container), r.nivelMinEmergencial ?? l.cotaMin);
-    defineSeVazio($('#nivelInicial', container), ((l.cotaMin + l.cotaMax) / 2));
-  };
-
-  $('#reservatorio', container).addEventListener('change', carregar);
   $$('input[name="fonte"]', container).forEach((el) => el.addEventListener('change', () => {
     const serie = $('input[name="fonte"]:checked', container).value === 'serie';
     $('#caixa-triangular', container).classList.toggle('oculto', serie);
     $('#caixa-serie', container).classList.toggle('oculto', !serie);
   }));
+
+  $('#serieQaf', container).addEventListener('input', () => {
+    const v = lerListaNumeros($('#serieQaf', container).value);
+    $('#info-serie', container).textContent = v.length
+      ? `${v.length} valores → ${(v.length / 4).toFixed(2)} h · pico ${num(Math.max(...v))} m³/s` : '';
+  });
+
   const atualizarRampa = () => {
     const d = Number($('#vertDegrau', container).value) || 0;
     const p = Math.max(1, Number($('#vertPassos', container).value) || 1);
@@ -153,11 +193,22 @@ export async function render(container) {
   $('#vertPassos', container).addEventListener('input', atualizarRampa);
   atualizarRampa();
 
-  $('#serieQaf', container).addEventListener('input', () => {
-    const v = lerListaNumeros($('#serieQaf', container).value);
-    $('#info-serie', container).textContent = v.length
-      ? `${v.length} valores → ${(v.length / 4).toFixed(2)} h · pico ${num(Math.max(...v))} m³/s` : '';
-  });
+  // O resumo de cada conjunto acompanha tanto a disponibilidade quanto as
+  // características, que moram no bloco recolhido.
+  const atualizarConjuntos = () => {
+    for (const bloco of $$('[data-conjunto]', container)) {
+      const i = bloco.dataset.conjunto;
+      const fino = $(`[data-conjunto-fino="${i}"]`, container);
+      const disp = Number($('[data-campo="disponiveis"]', bloco).value) || 0;
+      const cap = Number($('[data-campo="capacidadeUnidade"]', fino).value) || 0;
+      const nivel = valorNumerico($('[data-campo="nivelMinimo"]', fino));
+      $('[data-resumo]', bloco).textContent =
+        `${num(disp * cap)} m³/s` + (Number.isFinite(nivel) ? ` · capta acima de ${num(nivel)} m` : '');
+    }
+  };
+  $('#conjuntos', container).addEventListener('change', atualizarConjuntos);
+  $('#conjuntos-fino', container).addEventListener('input', atualizarConjuntos);
+  atualizarConjuntos();
 
   $('#form-cheia', container).addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -171,35 +222,48 @@ export async function render(container) {
       saida.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 'Calculando…');
   });
-
-  await carregar();
 }
 
-function defineSeVazio(input, valor) {
-  if (!input.value && Number.isFinite(Number(valor))) input.value = Number(valor).toFixed(2);
+// Linha compacta: o que muda a cada evento é quantas unidades estão de pé.
+function blocoConjunto(c, i) {
+  const opcoes = Array.from({ length: c.unidades + 1 }, (_, n) =>
+    `<option value="${n}"${n === c.disponiveis ? ' selected' : ''}>${n}</option>`).join('');
+  return `
+    <div class="conjunto" data-conjunto="${i}">
+      <span class="conjunto-nome">${esc(c.nome)}</span>
+      <label class="conjunto-disp">Disponíveis
+        <select data-campo="disponiveis">${opcoes}</select>
+      </label>
+      <span class="conjunto-de">de ${c.unidades}</span>
+      <span class="conjunto-resumo" data-resumo></span>
+    </div>`;
 }
 
-function renderConjuntos(container) {
-  $('#conjuntos', container).innerHTML = PADRAO_CONJUNTOS.map((c, i) => `
-    <div class="grade" data-conjunto="${i}" style="margin-bottom:10px">
+// Características da instalação: mudam raramente, ficam recolhidas.
+function blocoConjuntoFino(c, i) {
+  return `
+    <div class="grade" data-conjunto-fino="${i}" style="margin-bottom:10px">
       <label>Conjunto<input type="text" data-campo="nome" value="${esc(c.nome)}" /></label>
       <label>Unidades<input type="number" data-campo="unidades" value="${c.unidades}" min="0" step="1" /></label>
       <label>Vazão por unidade (m³/s)<input type="number" data-campo="capacidadeUnidade" value="${c.capacidadeUnidade}" min="0" step="1" /></label>
-      <label>Disponíveis agora<input type="number" data-campo="disponiveis" value="${c.disponiveis}" min="0" step="1" /></label>
       <label>Nível mín. de captação (m)
         <input type="number" data-campo="nivelMinimo" value="${c.nivelMinimo ?? ''}" step="0.01" placeholder="sem limite" />
       </label>
-    </div>`).join('');
+    </div>`;
 }
 
+// A disponibilidade vem da linha compacta; o resto, do bloco recolhido.
 function lerConjuntos(container) {
-  return $$('[data-conjunto]', container).map((bloco) => ({
-    nome: $('[data-campo="nome"]', bloco).value.trim() || 'Conjunto',
-    unidades: Number($('[data-campo="unidades"]', bloco).value) || 0,
-    capacidadeUnidade: Number($('[data-campo="capacidadeUnidade"]', bloco).value) || 0,
-    disponiveis: Number($('[data-campo="disponiveis"]', bloco).value) || 0,
-    nivelMinimo: valorNumerico($('[data-campo="nivelMinimo"]', bloco)),
-  }));
+  return $$('[data-conjunto]', container).map((bloco) => {
+    const fino = $(`[data-conjunto-fino="${bloco.dataset.conjunto}"]`, container);
+    return {
+      nome: $('[data-campo="nome"]', fino).value.trim() || 'Conjunto',
+      unidades: Number($('[data-campo="unidades"]', fino).value) || 0,
+      capacidadeUnidade: Number($('[data-campo="capacidadeUnidade"]', fino).value) || 0,
+      disponiveis: Number($('[data-campo="disponiveis"]', bloco).value) || 0,
+      nivelMinimo: valorNumerico($('[data-campo="nivelMinimo"]', fino)),
+    };
+  });
 }
 
 function montarConfig(container, estado) {
@@ -219,9 +283,12 @@ function montarConfig(container, estado) {
   if (hidrograma.length < 2) throw new Error('Informe um hidrograma com pelo menos dois valores.');
 
   const nivelInicial = valorNumerico($('#nivelInicial', container));
-  const nivelMaximo = valorNumerico($('#nivelMaximo', container));
-  if (nivelInicial == null) throw new Error('Informe o nível inicial.');
-  if (nivelMaximo == null) throw new Error('Informe o nível máximo a respeitar.');
+  if (nivelInicial == null) throw new Error('Informe o nível na partida.');
+  // Teto e piso vêm do cadastro do reservatório, não do formulário.
+  const { teto: nivelMaximo, piso: nivelMinimo } = estado;
+  if (!Number.isFinite(nivelMaximo) || !Number.isFinite(nivelMinimo)) {
+    throw new Error('Cadastre os níveis de emergência do reservatório antes de simular a cheia.');
+  }
 
   return {
     cav: estado.cav,
@@ -229,7 +296,7 @@ function montarConfig(container, estado) {
     hidrograma,
     nivelInicial,
     nivelMaximo,
-    nivelMinimo: valorNumerico($('#nivelMinimo', container)),
+    nivelMinimo,
     conjuntos: lerConjuntos(container),
     vertedouro: {
       capacidadeMax: Number($('#vertMax', container).value) || 0,
