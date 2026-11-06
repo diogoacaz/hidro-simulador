@@ -341,6 +341,16 @@ function htmlSaida({ resumo }, cfg) {
         ${resumo.estourouTeto ? `<p class="situacao-tipos"><strong>O nível ultrapassa o teto de ${num(resumo.nivelMaximo)} m</strong> em ${num(resumo.excedenteSobreTeto, 3)} hm³: os recursos informados não seguram esta cheia.</p>` : ''}
         ${resumo.rampaInsuficiente ? '<p class="situacao-tipos"><strong>O degrau de manobra não acompanha.</strong> A comporta precisaria abrir mais rápido do que o informado para conter o nível.</p>' : ''}
         ${resumo.seguraOPiso ? '' : `<p class="situacao-tipos"><strong>O nível fura o mínimo de ${num(resumo.nivelMinimo)} m</strong> mesmo com a retirada zerada: a afluência não repõe o que sai.</p>`}
+        ${resumo.precisaVerter ? `<p class="situacao-tipos">
+          ${resumo.bombeamentoNoMaximoAoVerter
+    ? 'O bombeamento fica no máximo que a cota permite durante todo o vertimento — a comporta é o último recurso.'
+    : '<strong>Atenção:</strong> há passos vertendo com bombeamento abaixo do disponível.'}
+          ${resumo.antecedenciaMin > 0
+    ? ` A comporta começa a abrir <strong>${num(resumo.antecedenciaMin / 60)} h antes</strong> de a afluência superar o bombeamento — não por sobrar bomba, mas porque o degrau de ${num(resumo.degrau)} m³/s a cada ${resumo.minutosPorDegrau} min precisa desse tempo para chegar ao pico. Esperar faria o nível passar do teto.`
+    : resumo.antecedenciaMin < 0
+      ? ` A comporta só abre <strong>${num(-resumo.antecedenciaMin / 60)} h depois</strong> de a afluência superar o bombeamento: nesse intervalo o próprio reservatório absorveu o excedente.`
+      : ''}
+        </p>` : ''}
       </div>
 
       <div class="metricas">
@@ -369,8 +379,15 @@ function htmlSaida({ resumo }, cfg) {
         ${grupo('Manobra da comporta', [
     item('Degrau', `${num(resumo.degrau)} m³/s a cada ${resumo.minutosPorDegrau} min`),
     item('Manobras no evento', `${resumo.manobras}`),
-    item('Taxa equivalente', `${num(resumo.rampaPorPasso)} m³/s por passo`),
-  ])}
+    resumo.antecedenciaMin != null
+      ? item('Abertura × saturação das bombas',
+        resumo.antecedenciaMin > 0
+          ? `${num(resumo.antecedenciaMin / 60)} h antes`
+          : resumo.antecedenciaMin < 0
+            ? `${num(-resumo.antecedenciaMin / 60)} h depois`
+            : 'no mesmo instante')
+      : '',
+  ].filter(Boolean))}
       </div>
 
       <div class="graficos">

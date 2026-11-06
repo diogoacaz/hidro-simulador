@@ -259,6 +259,23 @@ function montar({ cav, hidrograma, vertimento, estado, dataInicial, necessario, 
     });
   }
 
+  // Auditoria da ordem dos recursos: o vertimento é o último a entrar, então
+  // em nenhum passo com comporta aberta o bombeamento pode estar abaixo do
+  // que a cota permite.
+  const bombeamentoNoMaximoAoVerter = !serie.some(
+    (s) => s.qvert > 1e-9 && s.qbomb < s.bombeamentoDisponivel - 1e-9,
+  );
+
+  // A comporta abre antes de a afluência superar o bombeamento — não porque
+  // sobre bomba, mas porque o degrau de manobra exige antecedência. Medir
+  // essa folga explica a hora de abertura, que de outro modo parece cedo
+  // demais.
+  const instanteExcesso = serie.findIndex((s) => s.qaf > s.bombeamentoDisponivel + 1e-9);
+  const instanteAbertura = serie.findIndex((s) => s.qvert > 1e-9);
+  const antecedenciaMin = instanteAbertura >= 0 && instanteExcesso >= 0
+    ? ((instanteExcesso - instanteAbertura) * PASSO_SEGUNDOS) / 60
+    : null;
+
   const cotas = serie.map((s) => s.cota);
   const cotaMaxima = Math.max(...cotas);
   const picoVert = Math.max(0, ...vertimento);
@@ -309,6 +326,9 @@ function montar({ cav, hidrograma, vertimento, estado, dataInicial, necessario, 
       rampaPorPasso: degrau / passosPorDegrau,
       manobras: contarManobras(degraus),
       rampaInsuficiente,
+      bombeamentoNoMaximoAoVerter,
+      antecedenciaMin,
+      instanteExcesso: instanteExcesso >= 0 ? serie[instanteExcesso].dataHora : null,
       passosComRetiradaReduzida: estado.reduzido.filter(Boolean).length,
       seguraOPiso: Number.isFinite(nivelMinimo)
         ? Math.min(...estado.volumes) >= volumeDaCota(cav, nivelMinimo) - 1e-9
