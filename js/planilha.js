@@ -9,14 +9,62 @@ export function paraNumero(valor) {
   const temVirgula = texto.includes(',');
   const temPonto = texto.includes('.');
   if (temVirgula && temPonto) {
-    // O último separador é o decimal.
-    texto = texto.lastIndexOf(',') > texto.lastIndexOf('.')
+    // O último separador é o decimal; o outro só pode ser de milhar, e milhar
+    // vem em grupos de três. Sem essa conferência "2,27.0" virava 227 — a
+    // vírgula era removida como se fosse milhar, multiplicando por cem.
+    const virgulaDepois = texto.lastIndexOf(',') > texto.lastIndexOf('.');
+    const milhar = virgulaDepois ? '.' : ',';
+    if (!agrupaMilhar(texto, milhar)) return NaN;
+    texto = virgulaDepois
       ? texto.replace(/\./g, '').replace(',', '.')
       : texto.replace(/,/g, '');
   } else if (temVirgula) {
     texto = texto.replace(',', '.');
   }
   return Number(texto);
+}
+
+// Confere se o separador aparece só em posição de milhar: 1.234, 1.234.567.
+function agrupaMilhar(texto, separador) {
+  const esc = separador === '.' ? '\\.' : ',';
+  return new RegExp(`^[+-]?\\d{1,3}(?:${esc}\\d{3})+(?:[.,]\\d+)?$`).test(texto);
+}
+
+/**
+ * Extrai uma série numérica de uma matriz de planilha.
+ *
+ * A coluna é escolhida UMA vez para o arquivo inteiro — a última que é
+ * numérica na maioria das linhas. Antes a escolha era feita linha a linha
+ * ("a última célula numérica desta linha"), o que deixava qualquer coluna à
+ * direita sequestrar a leitura e podia até trocar de coluna no meio do
+ * arquivo, sem nada na tela denunciando.
+ *
+ * @returns {{valores:number[], coluna:string|null, descartadas:number}}
+ */
+export function extrairSerie(matriz) {
+  if (!matriz.length) return { valores: [], coluna: null, descartadas: 0 };
+
+  const temCabecalho = !matriz[0].some((c) => Number.isFinite(paraNumero(c)));
+  const cabecalho = temCabecalho ? matriz[0] : [];
+  const linhas = temCabecalho ? matriz.slice(1) : matriz;
+  if (!linhas.length) return { valores: [], coluna: null, descartadas: 0 };
+
+  const largura = Math.max(...linhas.map((l) => l.length));
+  const minimo = Math.max(1, Math.ceil(linhas.length * 0.8));
+  let indice = -1;
+  for (let c = largura - 1; c >= 0; c--) {
+    const validas = linhas.reduce((n, l) => n + (Number.isFinite(paraNumero(l[c])) ? 1 : 0), 0);
+    if (validas >= minimo) { indice = c; break; }
+  }
+  if (indice < 0) return { valores: [], coluna: null, descartadas: linhas.length };
+
+  const brutos = linhas.map((l) => paraNumero(l[indice]));
+  const valores = brutos.filter(Number.isFinite);
+  return {
+    valores,
+    coluna: String(cabecalho[indice] ?? '').trim() || `coluna ${indice + 1}`,
+    descartadas: brutos.length - valores.length,
+  };
 }
 
 // Converte data/hora de planilha em string local "AAAA-MM-DDTHH:mm".

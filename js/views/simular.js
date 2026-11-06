@@ -4,7 +4,7 @@
 import * as db from '../db.js';
 import { limitesCav } from '../cav.js';
 import { simular, MODOS, ROTULOS_MODO, formatarDuracao } from '../simulation.js';
-import { lerArquivo, removerCabecalho, paraNumero, lerListaNumeros } from '../planilha.js';
+import { lerArquivo, extrairSerie, lerListaNumeros } from '../planilha.js';
 import { $, $$, esc, num, toast, comBotao, valorNumerico, paraInputDateTime } from '../ui.js';
 import * as resultadoView from './resultado.js';
 
@@ -188,28 +188,30 @@ export async function render(container) {
     $(`#${chave}-serie`, bloco).addEventListener('input', () => atualizarInfoSerie(chave, bloco));
   }
 
-  const atualizarInfoSerie = (chave, bloco) => {
+  const atualizarInfoSerie = (chave, bloco, origem = '') => {
     const valores = lerSerie($(`#${chave}-serie`, bloco).value);
     const info = $(`#${chave}-info`, bloco);
-    info.textContent = valores.length
-      ? `${valores.length} valores → ${formatarDuracao(valores.length * 15)} de hidrograma`
-      : '';
+    if (!valores.length) { info.textContent = ''; return; }
+    let min = Infinity; let max = -Infinity; let soma = 0;
+    for (const v of valores) { if (v < min) min = v; if (v > max) max = v; soma += v; }
+    // A faixa lida fica à vista: uma vírgula decimal mal interpretada muda a
+    // ordem de grandeza, e isso é invisível olhando só a contagem.
+    info.textContent = `${valores.length} valores${origem} → ${formatarDuracao(valores.length * 15)}`
+      + ` · mín ${num(min)} · máx ${num(max)} · média ${num(soma / valores.length)} m³/s`;
   };
 
   const carregarSerieDeArquivo = async (chave, bloco, arquivo) => {
     if (!arquivo) return;
     try {
-      const matriz = removerCabecalho(await lerArquivo(arquivo));
-      // Usa a última coluna numérica de cada linha (aceita "data;vazão" ou só "vazão").
-      const valores = matriz
-        .map((linha) => [...linha].reverse().map(paraNumero).find(Number.isFinite))
-        .filter(Number.isFinite);
-      if (!valores.length) throw new Error('Nenhum valor numérico encontrado no arquivo.');
+      // extrairSerie fixa UMA coluna para o arquivo todo e diz qual foi.
+      const { valores, coluna, descartadas } = extrairSerie(await lerArquivo(arquivo));
+      if (!valores.length) throw new Error('Nenhuma coluna numérica encontrada no arquivo.');
       $(`#${chave}-serie`, bloco).value = valores
         .map((v) => v.toLocaleString('pt-BR', { maximumFractionDigits: 6, useGrouping: false }))
         .join('\n');
-      atualizarInfoSerie(chave, bloco);
-      toast(`${valores.length} valores carregados.`, 'ok');
+      atualizarInfoSerie(chave, bloco, ` da coluna "${coluna}"`);
+      const ignoradas = descartadas ? ` ${descartadas} linha(s) sem número ignoradas.` : '';
+      toast(`${valores.length} valores lidos da coluna "${coluna}".${ignoradas}`, 'ok');
     } catch (err) {
       toast(err.message, 'erro');
     }
