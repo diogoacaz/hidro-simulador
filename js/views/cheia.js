@@ -147,6 +147,17 @@ export async function render(container) {
               <small id="info-rampa"></small>
             </label>
           </div>
+          <div class="grade grade-2" style="margin-top:14px">
+            <label>Começar a verter a partir da cota (m)
+              <input type="number" id="portaoInicio" step="0.01" placeholder="sem restrição" />
+              <small>Abaixo dela a comporta fica fechada, mesmo que o cálculo peça abertura.</small>
+            </label>
+            <label>Liberar acima do limite a partir da cota (m)
+              <input type="number" id="portaoLibera" step="0.01" placeholder="sem restrição" />
+              <small id="info-portao"></small>
+            </label>
+          </div>
+
           <details class="ajuste-fino">
             <summary>Características do vertedouro</summary>
             <div class="grade">
@@ -189,6 +200,15 @@ export async function render(container) {
     $('#info-rampa', container).textContent =
       `${num(d)} m³/s a cada ${p * 15} min · equivale a ${num(d / p)} m³/s por passo`;
   };
+  const atualizarPortao = () => {
+    const lim = Number($('#vertSemDano', container).value);
+    $('#info-portao', container).textContent = Number.isFinite(lim)
+      ? `Abaixo dela o vertimento fica limitado a ${num(lim)} m³/s, que não alaga.`
+      : 'Abaixo dela o vertimento fica limitado ao que não alaga.';
+  };
+  $('#vertSemDano', container).addEventListener('input', atualizarPortao);
+  atualizarPortao();
+
   $('#vertDegrau', container).addEventListener('input', atualizarRampa);
   $('#vertPassos', container).addEventListener('input', atualizarRampa);
   atualizarRampa();
@@ -303,6 +323,10 @@ function montarConfig(container, estado) {
       limiteSemDano: Number($('#vertSemDano', container).value),
       degrau: Number($('#vertDegrau', container).value) || 1,
       passosPorDegrau: Number($('#vertPassos', container).value) || 1,
+      portoes: {
+        inicio: valorNumerico($('#portaoInicio', container)),
+        liberaAcima: valorNumerico($('#portaoLibera', container)),
+      },
     },
     dataInicial: new Date($('#dataInicial', container).value || Date.now()),
   };
@@ -345,6 +369,12 @@ function htmlSaida({ resumo }, cfg) {
         ${resumo.estourouTeto ? `<p class="situacao-tipos"><strong>O nível ultrapassa o teto de ${num(resumo.nivelMaximo)} m</strong> em ${num(resumo.excedenteSobreTeto, 3)} hm³: os recursos informados não seguram esta cheia.</p>` : ''}
         ${resumo.rampaInsuficiente ? '<p class="situacao-tipos"><strong>O degrau de manobra não acompanha.</strong> A comporta precisaria abrir mais rápido do que o informado para conter o nível.</p>' : ''}
         ${resumo.seguraOPiso ? '' : `<p class="situacao-tipos"><strong>O nível fura o mínimo de ${num(resumo.nivelMinimo)} m</strong> mesmo com a retirada zerada: a afluência não repõe o que sai.</p>`}
+        ${resumo.passosBarradosPeloPortao ? `<p class="situacao-tipos">
+          <strong>Os gatilhos de nível seguraram a comporta em ${resumo.passosBarradosPeloPortao} passos</strong>
+          em que o cálculo já pedia mais abertura${resumo.estourouTeto
+    ? ' — e o nível passou do teto. Abrir antes, ou liberar o vertimento maior numa cota mais baixa, evitaria isso.'
+    : ', e ainda assim o nível se manteve dentro do teto.'}
+        </p>` : ''}
         ${resumo.precisaVerter ? `<p class="situacao-tipos">
           ${resumo.bombeamentoNoMaximoAoVerter
     ? 'O bombeamento fica no máximo que a cota permite durante todo o vertimento — a comporta é o último recurso.'
@@ -383,6 +413,11 @@ function htmlSaida({ resumo }, cfg) {
         ${grupo('Manobra da comporta', [
     item('Degrau', `${num(resumo.degrau)} m³/s a cada ${resumo.minutosPorDegrau} min`),
     item('Manobras no evento', `${resumo.manobras}`),
+    resumo.portoes && (Number.isFinite(resumo.portoes.inicio) || Number.isFinite(resumo.portoes.liberaAcima))
+      ? item('Gatilhos de nível',
+        `${Number.isFinite(resumo.portoes.inicio) ? `abre em ${num(resumo.portoes.inicio)} m` : 'sem gatilho de abertura'}`
+        + `${Number.isFinite(resumo.portoes.liberaAcima) ? ` · libera em ${num(resumo.portoes.liberaAcima)} m` : ''}`)
+      : '',
     resumo.antecedenciaMin != null
       ? item('Abertura × saturação das bombas',
         resumo.antecedenciaMin > 0

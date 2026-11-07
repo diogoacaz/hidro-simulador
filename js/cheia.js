@@ -65,6 +65,22 @@ export function hidrogramaTriangular({ base = 0, pico, horasSubida, horasRecessa
  * porque é o vertimento que se quer evitar — se algo precisa ceder, cede o
  * que alaga.
  */
+/**
+ * Quanto a comporta pode verter nesta cota, pelos gatilhos de nível.
+ *
+ * Verter é decisão política, não só hidráulica: abaixo do primeiro gatilho
+ * não se abre; entre ele e o segundo só se verte o que não alaga; acima do
+ * segundo, libera-se o que for preciso. A ferramenta respeita a regra e
+ * mostra se respeitá-la ainda segura o reservatório.
+ */
+function portaoVertimento(cota, portoes, limiteSemDano, capacidadeMax) {
+  const { inicio, liberaAcima } = portoes || {};
+  if (Number.isFinite(liberaAcima) && cota >= liberaAcima) return capacidadeMax;
+  if (Number.isFinite(inicio) && cota < inicio) return 0;
+  if (Number.isFinite(liberaAcima) && Number.isFinite(limiteSemDano)) return limiteSemDano;
+  return capacidadeMax;
+}
+
 function repartirSaida(disponivelBomba, vertProgramado, volume, qaf, volumePiso) {
   const saidaMax = Math.max(0, (volume - volumePiso) / HM3_POR_M3S + qaf);
   const qb = Math.min(disponivelBomba, saidaMax);
@@ -73,18 +89,41 @@ function repartirSaida(disponivelBomba, vertProgramado, volume, qaf, volumePiso)
 }
 
 // Simula o reservatório com um cronograma de vertimento já definido.
-function simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volumePiso) {
+function simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volumePiso, manobra = null) {
   const n = hidrograma.length;
   const volumes = new Array(n + 1);
   const bombeado = new Array(n);
   const vertido = new Array(n);
+  const comandado = new Array(n);
   const reduzido = new Array(n);
+  const barrado = new Array(n).fill(false);
   volumes[0] = volumeInicial;
+
+  const porBloco = Math.max(1, manobra?.porBloco || 1);
+  const degrau = manobra?.degrau || Infinity;
+  let alvoAtual = 0;
 
   for (let t = 0; t < n; t++) {
     const cota = cotaDoVolume(cav, volumes[t]);
+
+    // O comando da comporta só muda na grade da manobra, e nunca mais que um
+    // degrau de cada vez — inclusive quando um gatilho de nível acaba de
+    // liberar uma abertura maior.
+    if (manobra) {
+      if (t % porBloco === 0) {
+        const permitido = portaoVertimento(cota, manobra.portoes, manobra.limiteSemDano, manobra.capacidadeMax);
+        const alvo = Math.min(vertimento[t], permitido);
+        if (alvo > alvoAtual) alvoAtual = Math.min(alvo, alvoAtual + degrau);
+        else if (alvo < alvoAtual) alvoAtual = Math.max(alvo, alvoAtual - degrau);
+        barrado[t] = vertimento[t] > permitido + 1e-9;
+      }
+    } else {
+      alvoAtual = vertimento[t];
+    }
+    comandado[t] = alvoAtual;
+
     const { qb, qv, contido } = repartirSaida(
-      bombeamentoNaCota(conjuntos, cota), vertimento[t], volumes[t], hidrograma[t], volumePiso,
+      bombeamentoNaCota(conjuntos, cota), alvoAtual, volumes[t], hidrograma[t], volumePiso,
     );
     bombeado[t] = qb;
     vertido[t] = qv;
@@ -95,7 +134,7 @@ function simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volum
     // havia o que verter.
     volumes[t + 1] = volumes[t] + (hidrograma[t] - qb - qv) * HM3_POR_M3S;
   }
-  return { volumes, bombeado, vertido, reduzido };
+  return { volumes, bombeado, vertido, comandado, reduzido, barrado };
 }
 
 /**
@@ -221,10 +260,19 @@ export function amortecerCheia(cfg) {
   );
   const { envelope: vertimento, rampaInsuficiente, degraus } =
     envelopeDeRampa(necessario, degrau, passosPorDegrau, capacidadeMax);
-  const estado = simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volumePiso);
+
+  // O envelope é o ideal hidráulico. Os gatilhos de nível são a regra de
+  // operação, e é na simulação que ela se impõe — inclusive impedindo a
+  // antecipação da abertura, se o nível ainda não autorizar.
+  const manobra = {
+    degrau, porBloco: passosPorDegrau, limiteSemDano, capacidadeMax,
+    portoes: vertedouro.portoes || {},
+  };
+  const estado = simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volumePiso, manobra);
 
   return montar({
-    cav, hidrograma, vertimento: estado.vertido, programado: vertimento, estado, dataInicial, necessario, rampaInsuficiente,
+    cav, hidrograma, vertimento: estado.vertido, programado: estado.comandado, estado, dataInicial,
+    necessario, rampaInsuficiente, portoes: manobra.portoes,
     nivelMaximo, nivelMinimo, limiteSemDano, capacidadeMax, degrau, passosPorDegrau, degraus, conjuntos,
   });
 }
@@ -241,7 +289,7 @@ function contarManobras(degraus) {
   return n;
 }
 
-function montar({ cav, hidrograma, vertimento, programado, estado, dataInicial, necessario, rampaInsuficiente, nivelMaximo, nivelMinimo, limiteSemDano, capacidadeMax, degrau, passosPorDegrau, degraus, conjuntos }) {
+function montar({ cav, hidrograma, vertimento, programado, estado, dataInicial, necessario, rampaInsuficiente, portoes, nivelMaximo, nivelMinimo, limiteSemDano, capacidadeMax, degrau, passosPorDegrau, degraus, conjuntos }) {
   const n = hidrograma.length;
   const serie = [];
   for (let t = 0; t <= n; t++) {
@@ -338,6 +386,9 @@ function montar({ cav, hidrograma, vertimento, programado, estado, dataInicial, 
       rampaPorPasso: degrau / passosPorDegrau,
       manobras: contarManobras(degraus),
       rampaInsuficiente,
+      portoes,
+      // Onde a regra de nível impediu uma abertura que o cálculo pedia.
+      passosBarradosPeloPortao: estado.barrado.filter(Boolean).length,
       bombeamentoNoMaximoAoVerter,
       antecedenciaMin,
       instanteExcesso: instanteExcesso >= 0 ? serie[instanteExcesso].dataHora : null,
@@ -403,7 +454,13 @@ export function custoDoAtraso(cfg, atrasosEmPassos = [2, 4, 8, 12]) {
   const avaliar = (atraso) => {
     const atrasado = new Array(n).fill(0);
     for (let t = 0; t < n; t++) atrasado[t] = t < atraso ? 0 : base.serie[t - atraso].qvert;
-    const e = simularCom(cfg.cav, cfg.hidrograma, volumeInicial, cfg.conjuntos || [], atrasado, volumePiso);
+    const e = simularCom(cfg.cav, cfg.hidrograma, volumeInicial, cfg.conjuntos || [], atrasado, volumePiso, {
+      degrau: Number(cfg.vertedouro?.degrau) || Infinity,
+      porBloco: Math.max(1, Math.round(Number(cfg.vertedouro?.passosPorDegrau) || 1)),
+      limiteSemDano: limite,
+      capacidadeMax: Number(cfg.vertedouro?.capacidadeMax) || 0,
+      portoes: cfg.vertedouro?.portoes || {},
+    });
     const picoVert = Math.max(0, ...e.vertido);
     const acima = Number.isFinite(limite) ? e.vertido.filter((v) => v > limite + 1e-9).length : 0;
     const volumeMaximo = Math.max(...e.volumes);
