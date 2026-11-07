@@ -177,6 +177,14 @@ function envelopeDeRampa(necessario, degrau, passosPorDegrau, capacidadeMax) {
     anterior = bloco[b];
   }
 
+  // Aberturas em múltiplos do degrau: ninguém comanda uma comporta em
+  // 9,69 m³/s. Arredondar para cima é o lado seguro (verte um pouco mais,
+  // nível um pouco mais baixo) e preserva a restrição — valores brutos que
+  // diferem no máximo de um degrau continuam assim depois de quantizados.
+  for (let b = 0; b < nBlocos; b++) {
+    bloco[b] = Math.min(Math.ceil(bloco[b] / degrau - 1e-9) * degrau, capacidadeMax);
+  }
+
   const envelope = new Array(n);
   for (let t = 0; t < n; t++) envelope[t] = bloco[Math.floor(t / porBloco)];
   return { envelope, rampaInsuficiente, degraus: bloco, porBloco };
@@ -216,7 +224,7 @@ export function amortecerCheia(cfg) {
   const estado = simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volumePiso);
 
   return montar({
-    cav, hidrograma, vertimento: estado.vertido, estado, dataInicial, necessario, rampaInsuficiente,
+    cav, hidrograma, vertimento: estado.vertido, programado: vertimento, estado, dataInicial, necessario, rampaInsuficiente,
     nivelMaximo, nivelMinimo, limiteSemDano, capacidadeMax, degrau, passosPorDegrau, degraus, conjuntos,
   });
 }
@@ -233,7 +241,7 @@ function contarManobras(degraus) {
   return n;
 }
 
-function montar({ cav, hidrograma, vertimento, estado, dataInicial, necessario, rampaInsuficiente, nivelMaximo, nivelMinimo, limiteSemDano, capacidadeMax, degrau, passosPorDegrau, degraus, conjuntos }) {
+function montar({ cav, hidrograma, vertimento, programado, estado, dataInicial, necessario, rampaInsuficiente, nivelMaximo, nivelMinimo, limiteSemDano, capacidadeMax, degrau, passosPorDegrau, degraus, conjuntos }) {
   const n = hidrograma.length;
   const serie = [];
   for (let t = 0; t <= n; t++) {
@@ -246,6 +254,10 @@ function montar({ cav, hidrograma, vertimento, estado, dataInicial, necessario, 
       qaf: hidrograma[i],
       qbomb: estado.bombeado[i],
       qvert: vertimento[i],
+      // O valor comandado na comporta. O efetivo pode ficar abaixo dele
+      // quando o piso de emergência corta a retirada — é o programado que
+      // vai para o cronograma, porque é o que o operador executa.
+      qvertProgramado: programado[i],
       qsaida: estado.bombeado[i] + vertimento[i],
       retiradaReduzida: !!estado.reduzido[i],
       volume,
@@ -342,6 +354,70 @@ function montar({ cav, hidrograma, vertimento, estado, dataInicial, necessario, 
       bombeamentoMaximo: Math.max(...serie.map((s) => s.bombeamentoDisponivel)),
     },
   };
+}
+
+/**
+ * O cronograma que vai para a mão do operador: a cada manobra, a hora e a
+ * abertura alvo. O resultado do cálculo é uma série de 15 em 15 min, mas a
+ * comporta só se move nos degraus — o que se executa são estas linhas.
+ */
+export function cronogramaDeManobras({ serie, resumo }) {
+  const passo = Math.max(1, resumo.passosPorDegrau);
+  const linhas = [];
+  let anterior = 0;
+  for (let t = 0; t < serie.length - 1; t += passo) {
+    const alvo = serie[t].qvertProgramado;
+    if (Math.abs(alvo - anterior) <= 1e-9) { anterior = alvo; continue; }
+    linhas.push({
+      dataHora: serie[t].dataHora,
+      abertura: alvo,
+      variacao: alvo - anterior,
+      cota: serie[t].cota,
+      qaf: serie[t].qaf,
+      acimaDoLimite: Number.isFinite(resumo.limiteSemDano) && alvo > resumo.limiteSemDano + 1e-9,
+    });
+    anterior = alvo;
+  }
+  return linhas;
+}
+
+/**
+ * O que custa hesitar. Pega o cronograma calculado e o executa atrasado em N
+ * passos, como se o operador tivesse demorado a abrir. Mede o que a demora
+ * cobra: pico maior, mais tempo alagando, e se o nível passa do teto.
+ *
+ * A pergunta "e se eu começar tarde?" é a mais consequente da operação, e
+ * não tinha resposta na ferramenta.
+ */
+export function custoDoAtraso(cfg, atrasosEmPassos = [2, 4, 8, 12]) {
+  const base = amortecerCheia(cfg);
+  const n = cfg.hidrograma.length;
+  const { volumeMin: volumeMinCav } = limitesCav(cfg.cav);
+  const volumeInicial = volumeDaCota(cfg.cav, cfg.nivelInicial);
+  const volumePiso = Number.isFinite(cfg.nivelMinimo)
+    ? Math.max(volumeDaCota(cfg.cav, cfg.nivelMinimo), volumeMinCav)
+    : volumeMinCav;
+  const volumeTeto = volumeDaCota(cfg.cav, cfg.nivelMaximo);
+  const limite = Number(cfg.vertedouro?.limiteSemDano);
+
+  const avaliar = (atraso) => {
+    const atrasado = new Array(n).fill(0);
+    for (let t = 0; t < n; t++) atrasado[t] = t < atraso ? 0 : base.serie[t - atraso].qvert;
+    const e = simularCom(cfg.cav, cfg.hidrograma, volumeInicial, cfg.conjuntos || [], atrasado, volumePiso);
+    const picoVert = Math.max(0, ...e.vertido);
+    const acima = Number.isFinite(limite) ? e.vertido.filter((v) => v > limite + 1e-9).length : 0;
+    const volumeMaximo = Math.max(...e.volumes);
+    return {
+      atrasoMin: (atraso * PASSO_SEGUNDOS) / 60,
+      picoVert,
+      horasAcimaDoLimite: (acima * PASSO_SEGUNDOS) / 3600,
+      cotaMaxima: cotaDoVolume(cfg.cav, volumeMaximo),
+      excedenteSobreTeto: Math.max(0, volumeMaximo - volumeTeto),
+      estourouTeto: volumeMaximo > volumeTeto + 1e-9,
+    };
+  };
+
+  return [0, ...atrasosEmPassos].map(avaliar);
 }
 
 /**

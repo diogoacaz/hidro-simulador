@@ -8,10 +8,10 @@
 
 import * as db from '../db.js';
 import { limitesCav } from '../cav.js';
-import { amortecerCheia, hidrogramaTriangular, cenariosDeBombeamento } from '../cheia.js';
+import { amortecerCheia, hidrogramaTriangular, cenariosDeBombeamento, cronogramaDeManobras, custoDoAtraso } from '../cheia.js';
 import { graficoNivel, graficoNivelVertimento, graficoAfluenteVertimento, graficoVertimento, graficoAfluenteSaida, graficoBombeamento } from '../charts.js';
 import { $, $$, esc, num, toast, comBotao, valorNumerico, paraInputDateTime } from '../ui.js';
-import { lerListaNumeros } from '../planilha.js';
+import { lerListaNumeros, baixarCsv } from '../planilha.js';
 
 const PADRAO_CONJUNTOS = [
   { nome: 'Vigário', unidades: 4, capacidadeUnidade: 50, disponiveis: 4, nivelMinimo: 361.3 },
@@ -324,6 +324,10 @@ function htmlSaida({ resumo }, cfg) {
         <div><h2>Amortecimento</h2>
           <p class="ajuda">${esc(cfg.reservatorio?.nome || '')} · cheia de pico ${num(resumo.qafPico)} m³/s · ${num(resumo.volumeAfluente, 2)} hm³ afluentes</p>
         </div>
+        <div class="acoes" style="margin:0">
+          <button type="button" id="btn-exportar-cronograma">Exportar cronograma</button>
+          <button type="button" id="btn-exportar-serie">Exportar série</button>
+        </div>
       </div>
 
       <div class="hero">
@@ -405,6 +409,20 @@ function htmlSaida({ resumo }, cfg) {
     </section>
 
     <section class="painel">
+      <h2>Cronograma de manobras</h2>
+      <p class="ajuda">O que executar na comporta, manobra a manobra. Entre uma linha e outra a abertura
+      fica parada.</p>
+      <div id="cronograma"></div>
+    </section>
+
+    <section class="painel">
+      <h2>Se a abertura atrasar</h2>
+      <p class="ajuda">O cronograma acima executado tarde, como se a decisão demorasse. Mede a folga que
+      existe depois da hora marcada — e onde ela acaba.</p>
+      <div id="atraso"></div>
+    </section>
+
+    <section class="painel">
       <h2>Se faltarem bombas</h2>
       <p class="ajuda">A disponibilidade de ${esc(cfg.conjuntos[0]?.nome || 'bombeamento')} é a maior incerteza:
       grade entupida pelo lixo da cheia, unidade em manutenção. Abaixo, o mesmo evento com cada disponibilidade.</p>
@@ -440,6 +458,60 @@ function desenhar(resultado, cfg) {
 
   $('#cenarios-bombas').innerHTML = tabelaBombas(cenariosDeBombeamento(cfg, 0), cfg);
   $('#cenarios-nivel').innerHTML = tabelaNivel(cfg);
+
+  const cronograma = cronogramaDeManobras(resultado);
+  $('#cronograma').innerHTML = tabelaCronograma(cronograma, resumo);
+  $('#atraso').innerHTML = tabelaAtraso(custoDoAtraso(cfg), resumo);
+
+  const nome = (cfg.reservatorio?.nome || 'cheia').replace(/\W+/g, '-').toLowerCase();
+  $('#btn-exportar-cronograma').onclick = () => baixarCsv(`manobras-${nome}.csv`,
+    ['Data/hora', 'Abertura alvo (m³/s)', 'Variação (m³/s)', 'Cota (m)', 'Afluência (m³/s)', 'Acima do limite'],
+    cronograma.map((m) => [hora(m.dataHora), m.abertura.toFixed(1), m.variacao.toFixed(1),
+      m.cota.toFixed(2), m.qaf.toFixed(1), m.acimaDoLimite ? 'sim' : 'não']));
+
+  $('#btn-exportar-serie').onclick = () => baixarCsv(`cheia-${nome}.csv`,
+    ['Passo', 'Data/hora', 'Afluente (m³/s)', 'Bombeado (m³/s)', 'Vertido (m³/s)',
+      'Retirada total (m³/s)', 'Volume (hm³)', 'Cota (m)'],
+    serie.map((p) => [p.passo, hora(p.dataHora), p.qaf.toFixed(2), p.qbomb.toFixed(2),
+      p.qvert.toFixed(2), p.qsaida.toFixed(2), p.volume.toFixed(4), p.cota.toFixed(3)]));
+}
+
+
+function tabelaCronograma(linhas, resumo) {
+  if (!linhas.length) return '<p class="vazio">Nenhuma manobra: a comporta permanece fechada.</p>';
+  return `<div class="tabela-scroll"><table>
+    <thead><tr><th>Quando</th><th>Ação</th><th class="num">Abertura alvo</th>
+      <th class="num">Variação</th><th class="num">Cota no instante</th><th class="num">Afluência</th></tr></thead>
+    <tbody>${linhas.map((m) => `
+      <tr class="${m.acimaDoLimite ? 'violacao-atencao' : ''}">
+        <td><strong>${hora(m.dataHora)}</strong></td>
+        <td>${m.variacao > 0 ? 'Abrir' : 'Fechar'}${m.acimaDoLimite ? ' · alaga' : ''}</td>
+        <td class="num"><strong>${num(m.abertura)} m³/s</strong></td>
+        <td class="num">${m.variacao > 0 ? '+' : '−'}${num(Math.abs(m.variacao))}</td>
+        <td class="num">${num(m.cota)} m</td>
+        <td class="num">${num(m.qaf)} m³/s</td>
+      </tr>`).join('')}</tbody></table></div>
+    <p class="ajuda" style="margin-top:12px">${linhas.length} manobras, de ${num(resumo.degrau)} m³/s
+    a cada ${resumo.minutosPorDegrau} min.</p>`;
+}
+
+function tabelaAtraso(linhas, resumo) {
+  const ultimaOk = [...linhas].reverse().find((l) => !l.estourouTeto);
+  const folga = ultimaOk ? ultimaOk.atrasoMin : 0;
+  return `<div class="tabela-scroll"><table>
+    <thead><tr><th>Atraso na abertura</th><th class="num">Pico vertido</th>
+      <th class="num">Horas acima do limite</th><th class="num">Cota máx.</th><th>Situação</th></tr></thead>
+    <tbody>${linhas.map((l) => `
+      <tr class="${l.estourouTeto ? 'violacao-critico' : ''}">
+        <td><strong>${l.atrasoMin ? `${l.atrasoMin} min` : 'no horário'}</strong></td>
+        <td class="num">${num(l.picoVert)} m³/s</td>
+        <td class="num">${l.horasAcimaDoLimite ? num(l.horasAcimaDoLimite) : '—'}</td>
+        <td class="num">${num(l.cotaMaxima)} m</td>
+        <td>${l.estourouTeto ? `passa do teto em ${num(l.excedenteSobreTeto, 2)} hm³` : 'ainda segura'}</td>
+      </tr>`).join('')}</tbody></table></div>
+    <p class="ajuda" style="margin-top:12px">${folga
+    ? `Há cerca de <strong>${folga} min</strong> de folga depois da hora marcada (${hora(resumo.inicioAbertura)}) antes de o nível passar do teto.`
+    : 'Não há folga: qualquer atraso na abertura faz o nível passar do teto.'}</p>`;
 }
 
 function tabelaBombas(cenarios, cfg) {
