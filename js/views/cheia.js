@@ -7,7 +7,7 @@
 // que cota vale a pena partir.
 
 import * as db from '../db.js';
-import { limitesCav } from '../cav.js';
+import { limitesCav, volumeDaCota } from '../cav.js';
 import { amortecerCheia, hidrogramaCheia, cenariosDeBombeamento, cronogramaDeManobras, custoDoAtraso } from '../cheia.js';
 import { graficoCheia } from '../charts.js';
 import { $, $$, esc, num, toast, comBotao, valorNumerico, paraInputDateTime } from '../ui.js';
@@ -51,24 +51,29 @@ export async function render(container) {
   const pronto = !!cav && !faltamLimites;
 
   const l = cav ? limitesCav(cav) : null;
+  // O volume que importa na cheia é o que cabe entre os dois níveis de
+  // emergência, não o da tabela CAV inteira: abaixo do piso e acima do teto
+  // não há manobra possível.
+  const volumeUtil = cav && !faltamLimites
+    ? volumeDaCota(cav, teto) - volumeDaCota(cav, piso) : null;
   const captacao = nivelDeCaptacao(reservatorio);
   const conjuntos = PADRAO_CONJUNTOS.map((c, i) => ({
     ...c,
     nivelMinimo: i === 0 && Number.isFinite(captacao) ? captacao : c.nivelMinimo,
   }));
 
-  const inicialPadrao = Number.isFinite(reservatorio?.nivelMaxOperacional)
-    ? reservatorio.nivelMaxOperacional
-    : (Number.isFinite(teto) && Number.isFinite(piso) ? (teto + piso) / 2 : l ? (l.cotaMin + l.cotaMax) / 2 : 0);
+  // Partir do piso de emergência é o cenário de maior preparo: todo o volume
+  // entre os dois níveis fica disponível para amortecer a cheia.
+  const inicialPadrao = Number.isFinite(piso)
+    ? piso
+    : (l ? l.cotaMin : 0);
 
   container.innerHTML = `
     <section class="painel">
       <div class="cabecalho-painel">
         <div>
           <h2>Amortecimento de cheia</h2>
-          <p class="ajuda">${reservatorio
-    ? `${esc(reservatorio.nome)}${reservatorio.usinaNome ? ` · ${esc(reservatorio.usinaNome)}` : ''} — calcula se será necessário verter, qual o pico e a partir de que hora a comporta precisa começar a abrir.`
-    : 'Nenhum reservatório com tabela CAV importada.'}</p>
+          ${reservatorio ? '' : '<p class="ajuda">Nenhum reservatório com tabela CAV importada.</p>'}
         </div>
       </div>
 
@@ -76,8 +81,7 @@ export async function render(container) {
       <div class="referencias">
         <div class="referencia"><span>Teto — máx. emergencial</span><strong>${num(teto)} m</strong></div>
         <div class="referencia"><span>Piso — mín. emergencial</span><strong>${num(piso)} m</strong></div>
-        <div class="referencia"><span>Faixa da CAV</span><strong>${num(l.cotaMin)} a ${num(l.cotaMax)} m</strong></div>
-        <div class="referencia"><span>Volume útil</span><strong>${num(l.volumeMax - l.volumeMin, 3)} hm³</strong></div>
+        <div class="referencia"><span>Volume entre os dois</span><strong>${num(volumeUtil, 3)} hm³</strong></div>
         <p class="referencias-origem">Valores do cadastro do reservatório. <a href="#/reservatorios">Ajustar</a></p>
       </div>` : ''}
 
@@ -131,7 +135,7 @@ export async function render(container) {
           <div class="grade grade-2">
             <label>Cota ao início do evento (m)
               <input type="number" id="nivelInicial" step="0.01" value="${Number(inicialPadrao).toFixed(2)}" />
-              <small>Entre o piso e o teto do cadastro. A tabela ao fim mostra o efeito de partir mais baixo.</small>
+              <small>Entre o piso e o teto do cadastro. Sugerido no piso de emergência, que é o maior volume de espera possível.</small>
             </label>
             <label>Início do evento
               <input type="datetime-local" id="dataInicial" />
@@ -438,6 +442,8 @@ function htmlSaida({ resumo }, cfg) {
       </div>
 
       <div class="graficos">
+        <h3 class="titulo-grafico">A cheia passo a passo
+          <span>nível, vazões e bombeamento no mesmo eixo de tempo</span></h3>
         <div class="grafico-caixa cheia"><canvas id="g-cheia"></canvas></div>
       </div>
     </section>
@@ -467,7 +473,7 @@ function htmlSaida({ resumo }, cfg) {
           <div id="cenarios-bombas"></div>
         </details>
         <details class="cenario">
-          <summary>Partir de outra cota<span>deplecionar cria espera — mas pode parar a elevatória</span></summary>
+          <summary>Partir de outra cota<span>mais cheio reduz a espera; mais vazio pode parar a elevatória</span></summary>
           <div id="cenarios-nivel"></div>
         </details>
       </div>
@@ -571,14 +577,21 @@ function tabelaBombas(cenarios, cfg) {
 }
 
 function tabelaNivel(cfg) {
+  // Varre nos dois sentidos: partindo do piso de emergência não há como
+  // descer, e a pergunta vira "e se a cheia chegar com o reservatório mais
+  // cheio do que o planejado?".
   const passo = 0.25;
-  const linhas = [];
-  for (let d = 0; d <= 8; d++) {
-    const nivelInicial = +(cfg.nivelInicial - d * passo).toFixed(2);
-    if (cfg.nivelMinimo != null && nivelInicial < cfg.nivelMinimo - 1e-9) break;
-    const r = amortecerCheia({ ...cfg, nivelInicial });
-    linhas.push({ nivelInicial, ...r.resumo });
+  const dentro = (v) => (cfg.nivelMinimo == null || v >= cfg.nivelMinimo - 1e-9)
+    && (cfg.nivelMaximo == null || v <= cfg.nivelMaximo + 1e-9);
+  const cotas = [];
+  for (let d = -4; d <= 4; d++) {
+    const v = +(cfg.nivelInicial + d * passo).toFixed(2);
+    if (dentro(v) && !cotas.includes(v)) cotas.push(v);
   }
+  cotas.sort((x, y) => y - x);
+  const linhas = cotas.map((nivelInicial) => ({
+    nivelInicial, ...amortecerCheia({ ...cfg, nivelInicial }).resumo,
+  }));
   return `<div class="tabela-scroll"><table>
     <thead><tr><th>Nível na partida</th><th class="num">Pico vertido</th><th class="num">Horas acima do limite</th>
       <th class="num">Cota máx.</th><th class="num">Bombeamento mín.</th><th>Situação</th></tr></thead>

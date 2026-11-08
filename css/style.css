@@ -130,15 +130,6 @@ body {
   white-space: nowrap;
 }
 
-.subtitulo {
-  margin: 0;
-  font-size: 0.78rem;
-  color: var(--topo-suave);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .abas { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
 .abas::-webkit-scrollbar { display: none; }
 
@@ -638,6 +629,21 @@ tr.violacao-atencao td { background: color-mix(in srgb, var(--atencao) 7%, trans
 }
 
 .graficos > .grafico-caixa:first-child { border-top: none; padding-top: 4px; }
+.titulo-grafico {
+  margin: 18px 0 2px;
+  font-size: 0.95rem;
+  font-weight: 650;
+  color: var(--texto);
+}
+
+.titulo-grafico span {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--texto-suave);
+}
+
 .grafico-caixa.alta { height: 380px; }
 
 /* Três painéis empilhados precisam de altura para cada um respirar. */
@@ -1015,10 +1021,6 @@ a { color: inherit; text-decoration: none; }
 .ajuste-fino[open] { padding-bottom: 4px; }
 
 /* ---------- Responsivo ---------- */
-
-@media (max-width: 900px) {
-  .subtitulo { display: none; }
-}
 
 @media (max-width: 720px) {
   .topo {

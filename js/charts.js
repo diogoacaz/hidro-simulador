@@ -50,11 +50,13 @@ function varCss(nome, alternativa) {
 function cores() {
   const escuro = temaEscuro.matches;
   return {
-    nivel: escuro ? '#c3ff24' : '#047857',
-    volume: escuro ? '#22d3ee' : '#0891b2',
-    area: escuro ? '#5eead4' : '#0b7285',
-    qaf: escuro ? '#1f9ed6' : '#0369a1',
-    qdef: escuro ? '#c08a08' : '#b45309',
+    // Paleta categórica validada nos dois temas (ΔE normal e por daltonismo,
+    // contraste >= 3:1 contra a superfície de cada um). A ordem é a dos painéis.
+    nivel: escuro ? '#199e70' : '#15a06f',
+    qaf: escuro ? '#3987e5' : '#2a78d6',
+    qdef: escuro ? '#d95926' : '#eb6834',
+    volume: escuro ? '#9085e9' : '#6250d6',
+    area: escuro ? '#2bb3cc' : '#0e7490',
 
     operacional: varCss('--texto-suave', escuro ? '#8aa39c' : '#5a6e67'),
     emergencial: varCss('--critico', escuro ? '#f87171' : '#dc2626'),
@@ -272,6 +274,17 @@ const pluginPaineis = {
       let x = chartArea.left + 10;
       const cy = y.top + 13;
 
+      ctx.font = `700 11px ${FONTE.family}`;
+      ctx.fillStyle = opts.tinta;
+      ctx.fillText(painel.titulo, x, cy);
+      x += ctx.measureText(painel.titulo).width + 6;
+
+      ctx.font = `500 10px ${FONTE.family}`;
+      ctx.fillStyle = opts.suave;
+      ctx.fillText(painel.unidade, x, cy);
+      x += ctx.measureText(painel.unidade).width + 16;
+
+      if (painel.series.length < 2) continue;
       for (const serie of painel.series) {
         const oculta = serie.indice != null && chart.getDatasetMeta(serie.indice).hidden;
         if (oculta) continue;
@@ -285,15 +298,11 @@ const pluginPaineis = {
         ctx.setLineDash([]);
         x += 19;
 
-        ctx.font = `600 10px ${FONTE.family}`;
-        ctx.fillStyle = opts.tinta;
+        ctx.font = `500 10px ${FONTE.family}`;
+        ctx.fillStyle = opts.medio;
         ctx.fillText(serie.nome, x, cy);
         x += ctx.measureText(serie.nome).width + 14;
       }
-
-      ctx.font = `500 10px ${FONTE.family}`;
-      ctx.fillStyle = opts.suave;
-      ctx.fillText(painel.unidade, x, cy);
     }
     ctx.restore();
   },
@@ -784,17 +793,23 @@ export function graficoCheia(canvasId, serie, limites = {}) {
   opcoes.plugins.paineis = {
     divisor: escuro ? rgba(c.suave, 0.45) : rgba(c.suave, 0.3),
     tinta: c.texto,
+    medio: c.medio,
     suave: c.suave,
     lista: [
-      { eixo: 'yNivel', unidade: 'm', series: [{ nome: 'Nível do reservatório', cor: c.nivel, indice: 0 }] },
+      { eixo: 'yNivel',
+        titulo: 'Nível do reservatório',
+        unidade: '(m)',
+        series: [{ nome: 'Nível', cor: c.nivel, indice: 0 }] },
       { eixo: 'yVazao',
-        unidade: 'm³/s',
+        titulo: 'Afluência e vertimento',
+        unidade: '(m³/s)',
         series: [
           { nome: 'Afluente', cor: c.qaf, indice: 1 },
           { nome: 'Vertido', cor: c.qdef, indice: 2 },
         ] },
       { eixo: 'yBomba',
-        unidade: 'm³/s',
+        titulo: 'Bombeamento',
+        unidade: '(m³/s)',
         series: [
           { nome: 'Bombeado', cor: c.volume, indice: 3 },
           { nome: 'Disponível na cota', cor: c.volume, tracejado: [5, 4], indice: 4 },
