@@ -474,7 +474,66 @@ function envelopeDeRampa(necessario, degrau, passosPorDegrau, capacidadeMax) {
   return { envelope, rampaInsuficiente, degraus: bloco, porBloco };
 }
 
+/**
+ * O mesmo amortecimento rodado três vezes: com a afluência prevista e com
+ * ela errada para mais e para menos.
+ *
+ * A previsão de afluência é a maior incerteza do problema, e um número único
+ * esconde isso. Com os limites, cada ponto da série ganha um mínimo e um
+ * máximo — que não são o caso alto e o caso baixo ponto a ponto, mas o
+ * envelope dos três: com mais água entrando o nível sobe mais, mas o
+ * vertimento também começa antes, e nem sempre o extremo de uma grandeza
+ * vem do extremo da outra.
+ *
+ * O resultado principal continua sendo o central. Os limites acompanham.
+ */
 export function amortecerCheia(cfg) {
+  const central = amortecerUm(cfg);
+  const c = cfg.confianca;
+  if (!c || !c.ativo) return central;
+
+  const acima = Math.max(0, Number(c.acima) || 0) / 100;
+  const abaixo = Math.min(1, Math.max(0, Number(c.abaixo) || 0) / 100);
+  if (!acima && !abaixo) return central;
+
+  const escalar = (f) => cfg.hidrograma.map((q) => q * f);
+  const alta = acima ? amortecerUm({ ...cfg, hidrograma: escalar(1 + acima) }) : central;
+  const baixa = abaixo ? amortecerUm({ ...cfg, hidrograma: escalar(1 - abaixo) }) : central;
+
+  const campos = [['cota', 'cota'], ['qaf', 'qaf'], ['qvert', 'qvert']];
+  central.serie.forEach((ponto, t) => {
+    for (const [campo] of campos) {
+      const vs = [ponto[campo], alta.serie[t][campo], baixa.serie[t][campo]];
+      ponto[`${campo}Min`] = Math.min(...vs);
+      ponto[`${campo}Max`] = Math.max(...vs);
+    }
+  });
+
+  // O envelope inclui o caso central. Nem toda grandeza é monótona na
+  // afluência: com a cheia maior a comporta abre antes e o tempo acima do
+  // limite pode ficar MENOR que no caso previsto. Sem o central dentro, a
+  // faixa mostrada excluía o número que estava logo acima dela.
+  const envelope = (campo) => {
+    const vs = [central.resumo[campo], baixa.resumo[campo], alta.resumo[campo]]
+      .filter((v) => Number.isFinite(v));
+    return vs.length ? [Math.min(...vs), Math.max(...vs)] : null;
+  };
+
+  central.resumo.limites = {
+    acima: acima * 100,
+    abaixo: abaixo * 100,
+    picoVert: envelope('picoVert'),
+    cotaMaxima: envelope('cotaMaxima'),
+    volumeVertido: envelope('volumeVertido'),
+    horasAcimaDoLimite: envelope('horasAcimaDoLimite'),
+    estourouTeto: alta.resumo.estourouTeto,
+    passosForcados: alta.resumo.passosForcados,
+    saltoNoTeto: alta.resumo.saltoNoTeto,
+  };
+  return central;
+}
+
+function amortecerUm(cfg) {
   const {
     cav,
     hidrograma,
@@ -728,7 +787,8 @@ export function cronogramaDeManobras({ serie, resumo }) {
  * não tinha resposta na ferramenta.
  */
 export function custoDoAtraso(cfg, atrasosEmPassos = [2, 4, 8, 12]) {
-  const base = amortecerCheia(cfg);
+  // Os cenários comparam entre si, sempre com a afluência central.
+  const base = amortecerUm(cfg);
   const n = cfg.hidrograma.length;
   const { volumeMin: volumeMinCav } = limitesCav(cfg.cav);
   const volumeInicial = volumeDaCota(cfg.cav, cfg.nivelInicial);
@@ -787,7 +847,7 @@ export function cenariosDeBombeamento(cfg, conjuntoVariavel = 0) {
   const saida = [];
   for (let d = 0; d <= alvo.unidades; d++) {
     const conjuntos = base.map((c, i) => (i === conjuntoVariavel ? { ...c, disponiveis: d } : { ...c }));
-    const r = amortecerCheia({ ...cfg, conjuntos });
+    const r = amortecerUm({ ...cfg, conjuntos });
     saida.push({
       disponiveis: d,
       bombeamento: d * alvo.capacidadeUnidade,

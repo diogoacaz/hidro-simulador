@@ -880,6 +880,32 @@ a { color: inherit; text-decoration: none; }
 .metrica { display: flex; flex-direction: column; gap: 2px; }
 .metrica > span { font-size: 0.73rem; color: var(--texto-suave); line-height: 1.35; }
 
+.metrica > em {
+  font-size: 0.69rem;
+  font-style: normal;
+  color: var(--texto-suave);
+  line-height: 1.3;
+}
+
+/* Liga/desliga dos limites de confiança, acima dos dois percentuais. */
+.opcao-limites {
+  display: flex;
+  flex-direction: row;       /* o label do app é coluna por padrão */
+  align-items: flex-start;
+  gap: 9px;
+  margin: 18px 0 12px;
+  cursor: pointer;
+}
+
+.opcao-limites input {
+  width: auto;
+  margin: 2px 0 0;
+  flex: 0 0 auto;
+  accent-color: var(--acento-tinta);
+}
+.opcao-limites span { font-size: 0.82rem; font-weight: 500; }
+.opcao-limites small { display: block; margin-top: 2px; font-weight: 400; }
+
 .metrica > strong {
   font-size: 0.98rem;
   font-weight: 600;

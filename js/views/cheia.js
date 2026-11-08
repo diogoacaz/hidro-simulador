@@ -128,6 +128,19 @@ export async function render(container) {
               80 m³/s, ajuste sobre as dez maiores). Quanto mais próximos os dois tempos, mais abrupto
               o corte da cauda.</p>
             </details>
+
+            <label class="opcao-limites">
+              <input type="checkbox" id="confAtivo" checked />
+              <span>Limites de confiança da afluência
+                <small>A previsão é a maior incerteza do problema. Com os limites, o nível e o
+                vertimento vêm com a faixa em que podem cair.</small></span>
+            </label>
+            <div class="grade grade-3" id="caixa-confianca">
+              <label>Afluência pode ser maior em (%)
+                <input type="number" id="confAcima" value="20" step="5" min="0" max="200" /></label>
+              <label>…e menor em (%)
+                <input type="number" id="confAbaixo" value="20" step="5" min="0" max="90" /></label>
+            </div>
           </div>
           <label class="oculto" id="caixa-serie">Afluência de 15 em 15 min (m³/s)
             <textarea id="serieQaf" rows="4" placeholder="2,0&#10;5,5&#10;12,0"></textarea>
@@ -264,6 +277,12 @@ export async function render(container) {
         + (Number.isFinite(nivel) ? ` · capta acima de ${num(nivel)} m` : '');
     }
   };
+  const alternarLimites = () => {
+    $('#caixa-confianca', container).classList.toggle('oculto', !$('#confAtivo', container).checked);
+  };
+  $('#confAtivo', container).addEventListener('change', alternarLimites);
+  alternarLimites();
+
   $('#conjuntos', container).addEventListener('change', atualizarConjuntos);
   $('#conjuntos-fino', container).addEventListener('input', atualizarConjuntos);
   atualizarConjuntos();
@@ -358,6 +377,11 @@ function montarConfig(container, estado) {
     nivelMaximo,
     nivelMinimo,
     conjuntos: lerConjuntos(container),
+    confianca: {
+      ativo: $('#confAtivo', container).checked,
+      acima: Number($('#confAcima', container).value) || 0,
+      abaixo: Number($('#confAbaixo', container).value) || 0,
+    },
     vertedouro: {
       capacidadeMax: Number($('#vertMax', container).value) || 0,
       limiteSemDano: Number($('#vertSemDano', container).value),
@@ -406,6 +430,11 @@ function htmlSaida({ resumo }, cfg) {
   !resumo.precisaVerter ? 'Sem vertimento' : resumo.dentroDoLimite ? 'Vertimento sem alagar' : 'Alaga ribeirinhos'}</span>
           ${resumo.precisaVerter ? `<span class="situacao-contagem">abrir a comporta a partir de ${hora(resumo.inicioAbertura)}</span>` : ''}
         </div>
+        ${!resumo.passosForcados && resumo.limites?.passosForcados ? `<p class="situacao-tipos">
+          <strong>Com a afluência ${num(resumo.limites.acima, 0)}% acima do previsto, o nível encosta no teto.</strong>
+          Nesse caso a comporta teria de ser aberta de ${num(resumo.limites.saltoNoTeto)} m³/s de uma vez.
+          Na afluência prevista isso não acontece.
+        </p>` : ''}
         ${resumo.passosForcados ? `<p class="situacao-tipos">
           <strong>O nível encostou no teto de ${num(resumo.nivelMaximo)} m às ${hora(resumo.inicioForcado)}.</strong>
           Ali o reservatório não guarda mais nada e a defluência tem de igualar a afluência: a comporta é
@@ -430,20 +459,23 @@ function htmlSaida({ resumo }, cfg) {
 
       <div class="metricas">
         ${grupo('Vertimento', [
-    item('Pico', `${num(resumo.picoVert)} m³/s`),
+    item('Pico', `${num(resumo.picoVert)} m³/s`, faixa(resumo.limites, 'picoVert', 'm³/s')),
     item('No instante', hora(resumo.instantePico)),
-    item('Volume vertido', `${num(resumo.volumeVertido, 2)} hm³`),
+    item('Volume vertido', `${num(resumo.volumeVertido, 2)} hm³`,
+      faixa(resumo.limites, 'volumeVertido', 'hm³')),
     item(`Acima de ${num(resumo.limiteSemDano)} m³/s`,
       resumo.horasAcimaDoLimite
         ? `${num(resumo.horasAcimaDoLimite)} h · ${num(resumo.volumeAcimaDoLimite, 2)} hm³`
-        : 'não ocorre'),
+        : 'não ocorre',
+      faixa(resumo.limites, 'horasAcimaDoLimite', 'h')),
     item('Manobra imposta pelo teto',
       resumo.passosForcados
         ? `+${num(resumo.saltoNoTeto)} m³/s de uma vez`
         : 'não ocorre'),
   ])}
         ${grupo('Nível', [
-    item('Início → máximo', `${num(resumo.cotaInicial)} → ${num(resumo.cotaMaxima)} m`),
+    item('Início → máximo', `${num(resumo.cotaInicial)} → ${num(resumo.cotaMaxima)} m`,
+      faixa(resumo.limites, 'cotaMaxima', 'm')),
     item('Mínimo no período', `${num(resumo.cotaMinima)} m`),
     item('Teto e piso', `${num(resumo.nivelMaximo)} / ${num(resumo.nivelMinimo)} m`),
   ])}
@@ -505,14 +537,28 @@ function htmlSaida({ resumo }, cfg) {
 function grupo(titulo, itens) {
   return `<div class="metrica-grupo"><h3>${esc(titulo)}</h3>${itens.join('')}</div>`;
 }
-function item(rotulo, valor) {
-  return `<div class="metrica"><span>${esc(rotulo)}</span><strong>${valor}</strong></div>`;
+function item(rotulo, valor, nota = '') {
+  return `<div class="metrica"><span>${esc(rotulo)}</span><strong>${valor}</strong>${
+    nota ? `<em>${nota}</em>` : ''}</div>`;
+}
+
+// A faixa que os limites de confiança abrem em torno de um número.
+function faixa(limites, campo, unidade, casas = 2) {
+  if (!limites || !limites[campo]) return '';
+  // Mais água entrando nem sempre dá o maior valor: com a cheia maior a
+  // comporta abre antes e o tempo acima do limite pode encurtar. Os dois
+  // extremos vêm ordenados, não na ordem em que foram calculados.
+  const [baixo, alto] = [...limites[campo]].sort((x, y) => x - y);
+  if (Math.abs(alto - baixo) < 1e-9) return '';
+  return `${num(baixo, casas)} a ${num(alto, casas)} ${unidade} com os limites`;
 }
 
 function desenhar(resultado, cfg) {
   const { serie, resumo } = resultado;
   graficoCheia('g-cheia', serie, {
     nivelMaximo: cfg.nivelMaximo, nivelMinimo: cfg.nivelMinimo, limiteSemDano: resumo.limiteSemDano,
+    rotuloLimites: resumo.limites
+      ? `−${num(resumo.limites.abaixo, 0)}% / +${num(resumo.limites.acima, 0)}%` : '',
   });
 
   $('#cenarios-bombas').innerHTML = tabelaBombas(cenariosDeBombeamento(cfg, 0), cfg);
@@ -633,7 +679,7 @@ function tabelaNivel(cfg) {
   }
   cotas.sort((x, y) => y - x);
   const linhas = cotas.map((nivelInicial) => ({
-    nivelInicial, ...amortecerCheia({ ...cfg, nivelInicial }).resumo,
+    nivelInicial, ...amortecerCheia({ ...cfg, nivelInicial, confianca: null }).resumo,
   }));
   return `<div class="tabela-scroll"><table>
     <thead><tr><th>Nível na partida</th><th class="num">Pico vertido</th><th class="num">Horas acima do limite</th>

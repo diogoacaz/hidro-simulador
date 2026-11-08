@@ -308,14 +308,20 @@ const pluginPaineis = {
 
       ctx.textAlign = 'left';
       for (const { serie, largura } of itens) {
-        ctx.strokeStyle = serie.cor;
-        ctx.lineWidth = 2;
-        ctx.setLineDash(serie.tracejado || []);
-        ctx.beginPath();
-        ctx.moveTo(x, yLegenda);
-        ctx.lineTo(x + 14, yLegenda);
-        ctx.stroke();
-        ctx.setLineDash([]);
+        if (serie.faixa) {
+          // A faixa de confiança é área, não traço: a amostra é um retângulo.
+          ctx.fillStyle = serie.cor;
+          ctx.fillRect(x, yLegenda - 4, 14, 8);
+        } else {
+          ctx.strokeStyle = serie.cor;
+          ctx.lineWidth = 2;
+          ctx.setLineDash(serie.tracejado || []);
+          ctx.beginPath();
+          ctx.moveTo(x, yLegenda);
+          ctx.lineTo(x + 14, yLegenda);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
         ctx.fillStyle = opts.medio;
         ctx.fillText(serie.nome, x + 19, yLegenda);
         x += largura + ESPACO;
@@ -728,6 +734,7 @@ export function graficoCav(canvasVolumeId, canvasAreaId, cav) {
  */
 export function graficoCheia(canvasId, serie, limites = {}) {
   refazer.set(canvasId, () => graficoCheia(canvasId, serie, limites));
+  const rotuloLimites = limites.rotuloLimites || '';
   const pontos = amostrar(serie);
   const c = cores();
   const escuro = temaEscuro.matches;
@@ -827,6 +834,35 @@ export function graficoCheia(canvasId, serie, limites = {}) {
     yNivel: eixo(3, { ocultarMinimo: true, faixa: faixaNivel, marcas: 6, folgaNoAlto: 0.24 }),
   };
 
+  // Faixas dos limites de confiança: duas séries cinzas por grandeza, a de
+  // cima preenchida até a de baixo. Entram ANTES das linhas no array para
+  // ficarem por baixo delas, e fora do tooltip e da legenda — são a mesma
+  // grandeza, não outra série.
+  const temLimites = pontos.some((p) => Number.isFinite(p.cotaMax));
+  const cinza = rgba(c.suave, escuro ? 0.18 : 0.16);
+  const faixa = (campo, eixo, cor) => {
+    if (!temLimites) return [];
+    const borda = rgba(cor, escuro ? 0.4 : 0.32);
+    const alto = {
+      label: `${campo} máx`,
+      data: pontos.map((p) => p[`${campo}Max`]),
+      borderColor: borda,
+      borderWidth: 1,
+      pointRadius: 0,
+      pointHitRadius: 0,
+      tension: 0.25,
+      cubicInterpolationMode: 'monotone',
+      yAxisID: eixo,
+      backgroundColor: cinza,
+      fill: '+1',
+      semLegenda: true,
+    };
+    const baixo = {
+      ...alto, label: `${campo} mín`, data: pontos.map((p) => p[`${campo}Min`]), fill: false,
+    };
+    return [alto, baixo];
+  };
+
   const nivel = serieLinha('Nível (m)', pontos.map((p) => p.cota), c.nivel);
   nivel.yAxisID = 'yNivel';
 
@@ -872,12 +908,32 @@ export function graficoCheia(canvasId, serie, limites = {}) {
     ],
   };
 
+  // Só os RESULTADOS ganham faixa. A da afluência seria o próprio ±% que o
+  // usuário digitou, e sobreposta à do vertimento virava uma mancha só.
+  const bandas = [...faixa('cota', 'yNivel', c.nivel), ...faixa('qvert', 'yVazao', c.qdef)];
+  const datasets = [...bandas, nivel, afluente, vertido, bombeado, revertido];
+  const base = bandas.length;
+  const indices = { nivel: base, afluente: base + 1, vertido: base + 2, bombeado: base + 3, revertido: base + 4 };
+
+  // As séries cinzas não entram na leitura ponto a ponto: a faixa se vê,
+  // não se consulta.
+  opcoes.plugins.tooltip.filter = (item) => !item.dataset.semLegenda;
+
+  opcoes.plugins.paineis.lista[0].series[0].indice = indices.nivel;
+  opcoes.plugins.paineis.lista[1].series[0].indice = indices.afluente;
+  opcoes.plugins.paineis.lista[1].series[1].indice = indices.vertido;
+  opcoes.plugins.paineis.lista[2].series[0].indice = indices.bombeado;
+  opcoes.plugins.paineis.lista[2].series[1].indice = indices.revertido;
+  if (temLimites) {
+    opcoes.plugins.paineis.lista[0].series.push(
+      { nome: `Limites ${rotuloLimites}`, cor: cinza, faixa: true });
+    opcoes.plugins.paineis.lista[1].series.push(
+      { nome: `Limites do vertimento ${rotuloLimites}`, cor: cinza, faixa: true });
+  }
+
   return criarGrafico(canvasId, {
     type: 'line',
-    data: {
-      labels: rotularPontos(pontos),
-      datasets: [nivel, afluente, vertido, bombeado, revertido],
-    },
+    data: { labels: rotularPontos(pontos), datasets },
     options: opcoes,
   });
 }
