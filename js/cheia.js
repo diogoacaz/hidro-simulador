@@ -21,6 +21,14 @@ import { PASSO_SEGUNDOS } from './simulation.js';
 const HM3_POR_M3S = PASSO_SEGUNDOS / 1e6;
 const ITERACOES = 14;
 
+// Crista da cheia de projeto, medida no histórico de Santana: a vazão fica
+// acima de 94% do pico por cerca de duas horas, antes e depois do máximo.
+// A subida arredonda nas últimas HORAS_CRISTA; depois do pico o máximo se
+// sustenta por HORAS_PATAMAR antes de a recessão começar. O patamar saiu de
+// varredura contra os dez maiores eventos — 0,5 h é onde o erro é mínimo.
+const HORAS_CRISTA = 1.5;
+const HORAS_PATAMAR = 0.5;
+
 /**
  * Capacidade de bombeamento disponível numa dada cota.
  * Cada conjunto só bombeia acima do seu nível mínimo de captação.
@@ -44,11 +52,25 @@ export function bombeamentoNaCota(conjuntos, cota) {
  * (dez/2021 a abr/2023, 16 eventos acima de 80 m³/s), ajustando candidatas
  * aos dez maiores por mínimos quadrados.
  *
- * SUBIDA — linear. Chegamos a usar uma curva em S, por leitura apressada de
- * um evento só; medindo os dez maiores com o mesmo critério de início, a
- * forma varia muito (três quase retas, quatro côncavas, duas convexas) e a
- * reta é a que menos erra na média ponderada pelo pico. O parâmetro que
- * importa é a DURAÇÃO da subida, não a curvatura.
+ * SUBIDA — reta no corpo, com a crista arredondada. Chegamos a usar uma
+ * curva em S, por leitura apressada de um evento só; medindo os dez maiores
+ * com o mesmo critério de início, a forma varia muito (três quase retas,
+ * quatro côncavas, duas convexas) e a reta é a que menos erra na média
+ * ponderada pelo pico. O parâmetro que importa é a DURAÇÃO, não a curvatura.
+ *
+ * Mas a reta chega ao pico com inclinação cheia e encontra a recessão num
+ * canto — um bico que não existe no dado. A vazão real se sustenta perto do
+ * máximo por uma a duas horas: no evento de 656 m³/s ainda estava em 99% uma
+ * hora depois do pico e 94% duas horas depois. Por isso a última hora e meia
+ * da subida vira uma parábola que chega ao pico com inclinação zero, colada
+ * à reta em valor e inclinação. O custo no ajuste global é de 3%, e o topo
+ * melhora bastante: a 80% do tempo de subida a reta dava 0,80 contra 0,91
+ * medido, e com a crista dá 0,87.
+ *
+ * A recessão já saía do pico com inclinação zero, porque o expoente é maior
+ * que 1 — então agora as duas se encontram suaves. Do lado da descida o
+ * máximo ainda se sustenta meia hora antes de a recessão começar, que é
+ * onde o erro contra os dez maiores eventos fica mínimo.
  *
  * RECESSÃO — exponencial de expoente ajustável:
  *
@@ -87,10 +109,26 @@ export function hidrogramaCheia({
     : 1;
   const k = (t50 * porHora) / Math.log(2) ** (1 / expoente);
 
+  // Crista: fração da subida ocupada pela parábola de topo. Fixa em tempo
+  // (1,5 h), não em proporção, porque é isso que o dado mostra — o patamar
+  // perto do pico dura o mesmo tanto, suba a cheia em 5 h ou em 30 h.
+  const w = Math.min(0.5, (HORAS_CRISTA * porHora) / subida);
+  const escala = 1 / (1 - w / 2);
+
   const serie = [];
   for (let i = 0; i < antes; i++) serie.push(base);
-  for (let i = 1; i <= subida; i++) serie.push(base + (pico - base) * (i / subida));
-  for (let i = 1; i <= depois; i++) serie.push(base + (pico - base) * Math.exp(-((i / k) ** expoente)));
+  for (let i = 1; i <= subida; i++) {
+    const u = i / subida;
+    const forma = u <= 1 - w
+      ? escala * u
+      : 1 - (escala / (2 * w)) * (1 - u) ** 2;
+    serie.push(base + (pico - base) * forma);
+  }
+  const patamar = Math.round(HORAS_PATAMAR * porHora);
+  for (let i = 0; i < patamar; i++) serie.push(pico);
+  for (let i = 1; i <= depois - patamar; i++) {
+    serie.push(base + (pico - base) * Math.exp(-((i / k) ** expoente)));
+  }
   return serie;
 }
 
