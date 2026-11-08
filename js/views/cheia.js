@@ -132,14 +132,13 @@ export async function render(container) {
             <label class="opcao-limites">
               <input type="checkbox" id="confAtivo" checked />
               <span>Limites de confiança da afluência
-                <small>A previsão é a maior incerteza do problema. Com os limites, o nível e o
-                vertimento vêm com a faixa em que podem cair.</small></span>
+                <small>A previsão é a maior incerteza do problema. Com os limites, a onda e o que
+                ela provoca vêm com a faixa em que podem cair.</small></span>
             </label>
             <div class="grade grade-3" id="caixa-confianca">
-              <label>Afluência pode ser maior em (%)
-                <input type="number" id="confAcima" value="20" step="5" min="0" max="200" /></label>
-              <label>…e menor em (%)
-                <input type="number" id="confAbaixo" value="20" step="5" min="0" max="90" /></label>
+              <label>Incerteza da afluência (± %)
+                <input type="number" id="confPercentual" value="5" step="1" min="0" max="90" />
+                <small>Aplicada para cima e para baixo.</small></label>
             </div>
           </div>
           <label class="oculto" id="caixa-serie">Afluência de 15 em 15 min (m³/s)
@@ -379,8 +378,7 @@ function montarConfig(container, estado) {
     conjuntos: lerConjuntos(container),
     confianca: {
       ativo: $('#confAtivo', container).checked,
-      acima: Number($('#confAcima', container).value) || 0,
-      abaixo: Number($('#confAbaixo', container).value) || 0,
+      percentual: Number($('#confPercentual', container).value) || 0,
     },
     vertedouro: {
       capacidadeMax: Number($('#vertMax', container).value) || 0,
@@ -431,7 +429,7 @@ function htmlSaida({ resumo }, cfg) {
           ${resumo.precisaVerter ? `<span class="situacao-contagem">abrir a comporta a partir de ${hora(resumo.inicioAbertura)}</span>` : ''}
         </div>
         ${!resumo.passosForcados && resumo.limites?.passosForcados ? `<p class="situacao-tipos">
-          <strong>Com a afluência ${num(resumo.limites.acima, 0)}% acima do previsto, o nível encosta no teto.</strong>
+          <strong>Com a afluência ${num(resumo.limites.percentual, 0)}% acima do previsto, o nível encosta no teto.</strong>
           Nesse caso a comporta teria de ser aberta de ${num(resumo.limites.saltoNoTeto)} m³/s de uma vez.
           Na afluência prevista isso não acontece.
         </p>` : ''}
@@ -557,8 +555,7 @@ function desenhar(resultado, cfg) {
   const { serie, resumo } = resultado;
   graficoCheia('g-cheia', serie, {
     nivelMaximo: cfg.nivelMaximo, nivelMinimo: cfg.nivelMinimo, limiteSemDano: resumo.limiteSemDano,
-    rotuloLimites: resumo.limites
-      ? `−${num(resumo.limites.abaixo, 0)}% / +${num(resumo.limites.acima, 0)}%` : '',
+    rotuloLimites: resumo.limites ? `± ${num(resumo.limites.percentual, 0)}%` : '',
   });
 
   $('#cenarios-bombas').innerHTML = tabelaBombas(cenariosDeBombeamento(cfg, 0), cfg);

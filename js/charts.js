@@ -908,9 +908,11 @@ export function graficoCheia(canvasId, serie, limites = {}) {
     ],
   };
 
-  // Só os RESULTADOS ganham faixa. A da afluência seria o próprio ±% que o
-  // usuário digitou, e sobreposta à do vertimento virava uma mancha só.
-  const bandas = [...faixa('cota', 'yNivel', c.nivel), ...faixa('qvert', 'yVazao', c.qdef)];
+  const bandas = [
+    ...faixa('cota', 'yNivel', c.nivel),
+    ...faixa('qaf', 'yVazao', c.qaf),
+    ...faixa('qvert', 'yVazao', c.qdef),
+  ];
   const datasets = [...bandas, nivel, afluente, vertido, bombeado, revertido];
   const base = bandas.length;
   const indices = { nivel: base, afluente: base + 1, vertido: base + 2, bombeado: base + 3, revertido: base + 4 };
@@ -928,7 +930,7 @@ export function graficoCheia(canvasId, serie, limites = {}) {
     opcoes.plugins.paineis.lista[0].series.push(
       { nome: `Limites ${rotuloLimites}`, cor: cinza, faixa: true });
     opcoes.plugins.paineis.lista[1].series.push(
-      { nome: `Limites do vertimento ${rotuloLimites}`, cor: cinza, faixa: true });
+      { nome: `Limites ${rotuloLimites}`, cor: cinza, faixa: true });
   }
 
   return criarGrafico(canvasId, {

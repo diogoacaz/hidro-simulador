@@ -492,22 +492,20 @@ export function amortecerCheia(cfg) {
   const c = cfg.confianca;
   if (!c || !c.ativo) return central;
 
-  const acima = Math.max(0, Number(c.acima) || 0) / 100;
-  const abaixo = Math.min(1, Math.max(0, Number(c.abaixo) || 0) / 100);
-  if (!acima && !abaixo) return central;
+  const p = Math.min(0.9, Math.max(0, Number(c.percentual) || 0) / 100);
+  if (!p) return central;
 
   const escalar = (f) => cfg.hidrograma.map((q) => q * f);
-  const alta = acima ? amortecerUm({ ...cfg, hidrograma: escalar(1 + acima) }) : central;
-  const baixa = abaixo ? amortecerUm({ ...cfg, hidrograma: escalar(1 - abaixo) }) : central;
+  const alta = amortecerUm({ ...cfg, hidrograma: escalar(1 + p) });
+  const baixa = amortecerUm({ ...cfg, hidrograma: escalar(1 - p) });
 
-  const campos = [['cota', 'cota'], ['qaf', 'qaf'], ['qvert', 'qvert']];
-  central.serie.forEach((ponto, t) => {
-    for (const [campo] of campos) {
+  for (const campo of ['cota', 'qaf', 'qvert']) {
+    central.serie.forEach((ponto, t) => {
       const vs = [ponto[campo], alta.serie[t][campo], baixa.serie[t][campo]];
       ponto[`${campo}Min`] = Math.min(...vs);
       ponto[`${campo}Max`] = Math.max(...vs);
-    }
-  });
+    });
+  }
 
   // O envelope inclui o caso central. Nem toda grandeza é monótona na
   // afluência: com a cheia maior a comporta abre antes e o tempo acima do
@@ -520,8 +518,7 @@ export function amortecerCheia(cfg) {
   };
 
   central.resumo.limites = {
-    acima: acima * 100,
-    abaixo: abaixo * 100,
+    percentual: p * 100,
     picoVert: envelope('picoVert'),
     cotaMaxima: envelope('cotaMaxima'),
     volumeVertido: envelope('volumeVertido'),
