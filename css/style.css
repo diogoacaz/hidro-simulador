@@ -993,7 +993,19 @@ a { color: inherit; text-decoration: none; }
 .conjunto-nome {
   font-weight: 600;
   font-size: 0.88rem;
-  min-width: 112px;
+  min-width: 150px;
+}
+
+/* Bombeamento e reversão são as duas retiradas de Santana, e a tela não as
+   deixa passar por uma coisa só. */
+.conjunto-nome small {
+  display: block;
+  margin-top: 1px;
+  font-size: 0.66rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--texto-suave);
 }
 
 .conjunto-disp {

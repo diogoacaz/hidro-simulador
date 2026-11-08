@@ -13,10 +13,15 @@ import { graficoCheia } from '../charts.js';
 import { $, $$, esc, num, toast, comBotao, valorNumerico, paraInputDateTime } from '../ui.js';
 import { lerListaNumeros, baixarCsv } from '../planilha.js';
 
+// As duas retiradas de Santana. Vigário bombeia para o sistema; Santa
+// Cecília reverte para o Paraíba do Sul. Operações distintas, por isso o
+// tipo — a tela não as soma num número só.
 const PADRAO_CONJUNTOS = [
-  { nome: 'Vigário', unidades: 4, capacidadeUnidade: 50, disponiveis: 4, nivelMinimo: 361.3 },
-  { nome: 'Santa Cecília', unidades: 1, capacidadeUnidade: 30, disponiveis: 1, nivelMinimo: null },
+  { nome: 'Vigário', tipo: 'bombeamento', unidades: 4, capacidadeUnidade: 50, disponiveis: 4, nivelMinimo: 361.3 },
+  { nome: 'Santa Cecília', tipo: 'reversao', unidades: 1, capacidadeUnidade: 30, disponiveis: 1, nivelMinimo: null },
 ];
+
+const ROTULO_TIPO = { bombeamento: 'Bombeamento', reversao: 'Reversão' };
 
 const hora = (iso) => (iso ? new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '—');
 
@@ -145,10 +150,10 @@ export async function render(container) {
         </fieldset>
 
         <fieldset>
-          <legend>Bombeamento disponível agora</legend>
+          <legend>Retirada disponível agora</legend>
           <div id="conjuntos">${conjuntos.map(blocoConjunto).join('')}</div>
           <details class="ajuste-fino">
-            <summary>Ajustar características dos conjuntos</summary>
+            <summary>Ajustar características das instalações</summary>
             <div id="conjuntos-fino">${conjuntos.map(blocoConjuntoFino).join('')}</div>
           </details>
         </fieldset>
@@ -252,8 +257,11 @@ export async function render(container) {
       const disp = Number($('[data-campo="disponiveis"]', bloco).value) || 0;
       const cap = Number($('[data-campo="capacidadeUnidade"]', fino).value) || 0;
       const nivel = valorNumerico($('[data-campo="nivelMinimo"]', fino));
+      // As máquinas são de velocidade fixa: o que se escolhe é QUANTAS
+      // ligar, e cada uma entrega a capacidade inteira.
       $('[data-resumo]', bloco).textContent =
-        `${num(disp * cap)} m³/s` + (Number.isFinite(nivel) ? ` · capta acima de ${num(nivel)} m` : '');
+        `${num(disp * cap)} m³/s` + (disp ? ` · ${disp} × ${num(cap)}` : '')
+        + (Number.isFinite(nivel) ? ` · capta acima de ${num(nivel)} m` : '');
     }
   };
   $('#conjuntos', container).addEventListener('change', atualizarConjuntos);
@@ -279,8 +287,8 @@ function blocoConjunto(c, i) {
   const opcoes = Array.from({ length: c.unidades + 1 }, (_, n) =>
     `<option value="${n}"${n === c.disponiveis ? ' selected' : ''}>${n}</option>`).join('');
   return `
-    <div class="conjunto" data-conjunto="${i}">
-      <span class="conjunto-nome">${esc(c.nome)}</span>
+    <div class="conjunto" data-conjunto="${i}" data-tipo="${c.tipo}">
+      <span class="conjunto-nome">${esc(c.nome)}<small>${ROTULO_TIPO[c.tipo] || 'Bombeamento'}</small></span>
       <label class="conjunto-disp">Disponíveis
         <select data-campo="disponiveis">${opcoes}</select>
       </label>
@@ -312,6 +320,7 @@ function lerConjuntos(container) {
       capacidadeUnidade: Number($('[data-campo="capacidadeUnidade"]', fino).value) || 0,
       disponiveis: Number($('[data-campo="disponiveis"]', bloco).value) || 0,
       nivelMinimo: valorNumerico($('[data-campo="nivelMinimo"]', fino)),
+      tipo: bloco.dataset.tipo,
     };
   });
 }
@@ -415,7 +424,7 @@ function htmlSaida({ resumo }, cfg) {
     : ', e ainda assim o nível se manteve dentro do teto.'}
         </p>` : ''}
         ${resumo.precisaVerter && !resumo.bombeamentoNoMaximoAoVerter
-    ? '<p class="situacao-tipos"><strong>Atenção:</strong> há passos vertendo com bombeamento abaixo do disponível.</p>'
+    ? '<p class="situacao-tipos"><strong>Atenção:</strong> há passos vertendo com máquina parada que caberia na mesma defluência.</p>'
     : ''}
       </div>
 
@@ -440,7 +449,8 @@ function htmlSaida({ resumo }, cfg) {
   ])}
         ${grupo('Recursos e manobra', [
     item('Volume bombeado', `${num(resumo.volumeBombeado, 2)} hm³`),
-    item('Bombeamento na cota', `${num(resumo.bombeamentoMinimo)} a ${num(resumo.bombeamentoMaximo)} m³/s`),
+    item('Volume revertido', `${num(resumo.volumeRevertido, 2)} hm³`),
+    item('Retirada na cota', `${num(resumo.bombeamentoMinimo)} a ${num(resumo.bombeamentoMaximo)} m³/s`),
     item('Manobras', `${resumo.manobras} de ${num(resumo.degrau)} m³/s a cada ${resumo.minutosPorDegrau} min`),
     resumo.antecedenciaMin != null
       ? item('Abertura × bombas no limite',

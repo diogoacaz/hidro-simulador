@@ -28,21 +28,82 @@ const ITERACOES = 14;
 // varredura contra os dez maiores eventos — 0,5 h é onde o erro é mínimo.
 const HORAS_CRISTA = 1.5;
 const HORAS_PATAMAR = 0.5;
+// Por quantos passos a retirada escolhida tem de se sustentar. Ver a regra de
+// sustentação em repartirSaida.
+const PASSOS_SUSTENTACAO = 4;   // 1 h
+// De quantos em quantos passos uma máquina pode ser DESLIGADA. Ligar não
+// espera: numa cheia a bomba entra assim que for útil.
+const PASSOS_POR_DESLIGAMENTO = 4;   // 1 h
 
 /**
  * Capacidade de bombeamento disponível numa dada cota.
  * Cada conjunto só bombeia acima do seu nível mínimo de captação.
  */
-export function bombeamentoNaCota(conjuntos, cota) {
-  let total = 0;
-  for (const c of conjuntos || []) {
+// O que cada conjunto pode retirar na cota, já em passos de máquina: as
+// bombas são de velocidade fixa, então a vazão de um conjunto só assume os
+// múltiplos da capacidade de uma unidade.
+function conjuntosNaCota(conjuntos, cota) {
+  const prontos = [];
+  (conjuntos || []).forEach((c, indice) => {
     const unidades = Math.max(0, Number(c.disponiveis) || 0);
     const capacidade = Math.max(0, Number(c.capacidadeUnidade) || 0);
-    if (!unidades || !capacidade) continue;
-    if (Number.isFinite(c.nivelMinimo) && cota < c.nivelMinimo) continue;
-    total += unidades * capacidade;
-  }
-  return total;
+    if (!unidades || !capacidade) return;
+    if (Number.isFinite(c.nivelMinimo) && cota < c.nivelMinimo) return;
+    prontos.push({
+      indice, nome: c.nome, unidades, capacidade,
+      tipo: c.tipo === 'reversao' ? 'reversao' : 'bombeamento',
+    });
+  });
+  return prontos;
+}
+
+export function bombeamentoNaCota(conjuntos, cota) {
+  return conjuntosNaCota(conjuntos, cota).reduce((t, c) => t + c.unidades * c.capacidade, 0);
+}
+
+/**
+ * A maior retirada possível sem passar de `limite`.
+ *
+ * As bombas de Vigário e a elevatória de Santa Cecília não têm ajuste de
+ * vazão: ligada, a máquina entrega a capacidade dela inteira. Então a
+ * retirada não é um número contínuo que se corta no limite — é uma soma de
+ * máquinas ligadas, e reduzir significa DESLIGAR uma. Perto do piso de
+ * emergência isso muda o resultado: com 3 m³/s afluentes não se bombeia
+ * 3 m³/s, bombeia-se zero, porque a menor máquina já tira 30.
+ *
+ * Os conjuntos são poucos e pequenos (4 unidades e 1), então vale enumerar:
+ * é exato, e não há heurística para explicar depois.
+ */
+function retiradaPossivel(conjuntos, cota, limite, minimos = null) {
+  const prontos = conjuntosNaCota(conjuntos, cota);
+  const piso = prontos.map((c) => Math.min(c.unidades, minimos ? minimos[c.indice] || 0 : 0));
+  let melhor = null;
+  const buscar = (i, total, ligadas) => {
+    if (i === prontos.length) {
+      if (!melhor || total > melhor.total + 1e-9) melhor = { total, ligadas: [...ligadas] };
+      return;
+    }
+    const c = prontos[i];
+    for (let n = c.unidades; n >= piso[i]; n--) {
+      const soma = total + n * c.capacidade;
+      if (soma > limite + 1e-9) continue;
+      ligadas[i] = n;
+      buscar(i + 1, soma, ligadas);
+    }
+    ligadas[i] = piso[i];
+  };
+  buscar(0, 0, prontos.map(() => 0));
+  if (!melhor) return null;   // nem o mínimo pedido cabe
+
+  let bombeamento = 0;
+  let reversao = 0;
+  const unidades = (conjuntos || []).map(() => 0);
+  prontos.forEach((c, i) => {
+    unidades[c.indice] = melhor.ligadas[i];
+    const q = melhor.ligadas[i] * c.capacidade;
+    if (c.tipo === 'reversao') reversao += q; else bombeamento += q;
+  });
+  return { total: melhor.total, bombeamento, reversao, unidades };
 }
 
 /**
@@ -181,9 +242,49 @@ function portaoVertimento(cota, portoes, limiteSemDano, capacidadeMax) {
 // afluência no mesmo passo. A comporta deixa de ser o que limita: o que a
 // rampa não tiver aberto até ali passa assim mesmo, e esse excedente é
 // devolvido em `forcado` para que a tela não o confunda com manobra.
-function repartirSaida(disponivelBomba, vertProgramado, volume, qaf, volumePiso, volumeTeto, capacidadeMax) {
+// A melhor configuração que não desliga nada do que já está rodando.
+function retirada0(conjuntos, cota, limite, previa) {
+  return retiradaPossivel(conjuntos, cota, limite, previa ? previa.unidades : null);
+}
+
+function repartirSaida({
+  conjuntos, cota, vertProgramado, volume, qaf,
+  volumePiso, volumeTeto, capacidadeMax, retiradaPrevia = null, podeDesligar = true,
+}) {
   const saidaMax = Math.max(0, (volume - volumePiso) / HM3_POR_M3S + qaf);
-  const qb = Math.min(disponivelBomba, saidaMax);
+  const disponivelBomba = bombeamentoNaCota(conjuntos, cota);
+  // Regra de sustentação. Não basta a combinação caber NESTE passo: ela tem
+  // de se sustentar por PASSOS_SUSTENTACAO. Sem isso a máquina de velocidade
+  // fixa vira pulso — com o reservatório no mínimo e 3 m³/s afluentes, ligava
+  // no máximo que cabia num passo, esvaziava o que havia acumulado e
+  // desligava, repetidamente. Ninguém parte uma bomba de 50 m³/s assim.
+  //
+  // Na cheia a regra não aperta nada: com 600 m³/s afluentes e o nível alto,
+  // o limite passa de qualquer combinação e tudo o que há roda.
+  const sustentavel = Math.max(0, qaf + (volume - volumePiso) / (HM3_POR_M3S * PASSOS_SUSTENTACAO));
+
+  // Ligar é imediato; desligar espera a grade. A assimetria é o que mata o
+  // liga-desliga sem atrasar a resposta à cheia: a elevatória de 30 m³/s
+  // entrava e saía a cada passo só porque o limite sustentável cruzava o
+  // degrau dela para um lado e para o outro. Mantida ligada por uma hora, ela
+  // atravessa a oscilação. E como o vertimento nunca precisa esperar uma
+  // máquina que podia ter ligado, a ordem dos recursos continua garantida.
+  const teto = Math.min(saidaMax, sustentavel);
+  // Subir mantendo o que já roda: parar a elevatória de 30 para ligar mais
+  // uma bomba de 50 aumenta o total no papel, mas não é manobra que alguém
+  // faça. Só na grade de desligamento o conjunto pode ser rearranjado.
+  const subindo = retirada0(conjuntos, cota, teto, retiradaPrevia);
+  let retirada = retiradaPrevia;
+  if (!retirada || (subindo && subindo.total > retirada.total + 1e-9)) {
+    retirada = subindo || retiradaPossivel(conjuntos, cota, teto);
+  } else if (retirada.total > saidaMax + 1e-9) {
+    // O piso de emergência não espera grade nenhuma.
+    retirada = retiradaPossivel(conjuntos, cota, saidaMax);
+  } else if (podeDesligar) {
+    const melhor = retiradaPossivel(conjuntos, cota, teto);
+    if (melhor && melhor.total < retirada.total - 1e-9) retirada = melhor;
+  }
+  const qb = retirada.total;
   let qv = Math.min(vertProgramado, Math.max(0, saidaMax - qb));
   const contido = qb < disponivelBomba - 1e-9 || qv < vertProgramado - 1e-9;
 
@@ -196,7 +297,15 @@ function repartirSaida(disponivelBomba, vertProgramado, volume, qaf, volumePiso,
       qv = alvo;
     }
   }
-  return { qb, qv, contido, forcado };
+  // O vertimento é o último recurso: nenhuma máquina que pudesse ter sido
+  // ligada neste passo, pelas regras de operação, ficou parada enquanto a
+  // comporta passava água. Registrado aqui, onde as regras estão, e não
+  // recalculado depois contra uma combinação ideal que a operação não faria.
+  const maquinaOciosa = qv > 1e-9 && !!subindo && subindo.total > qb + 1e-9;
+  return {
+    qb, qv, contido, forcado, retirada, maquinaOciosa,
+    bombeamento: retirada.bombeamento, reversao: retirada.reversao,
+  };
 }
 
 // Simula o reservatório com um cronograma de vertimento já definido.
@@ -204,16 +313,19 @@ function simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volum
   const n = hidrograma.length;
   const volumes = new Array(n + 1);
   const bombeado = new Array(n);
+  const revertido = new Array(n);
   const vertido = new Array(n);
   const comandado = new Array(n);
   const reduzido = new Array(n);
   const forcado = new Array(n).fill(0);
   const barrado = new Array(n).fill(false);
+  const ociosa = new Array(n).fill(false);
   volumes[0] = volumeInicial;
 
   const porBloco = Math.max(1, manobra?.porBloco || 1);
   const degrau = manobra?.degrau || Infinity;
   let alvoAtual = 0;
+  let retiradaPrevia = null;
 
   for (let t = 0; t < n; t++) {
     const cota = cotaDoVolume(cav, volumes[t]);
@@ -241,11 +353,15 @@ function simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volum
     } else {
       alvoAtual = vertimento[t];
     }
-    const r = repartirSaida(
-      bombeamentoNaCota(conjuntos, cota), alvoAtual, volumes[t], hidrograma[t],
+    const r = repartirSaida({
+      conjuntos, cota, vertProgramado: alvoAtual, volume: volumes[t], qaf: hidrograma[t],
       volumePiso, volumeTeto, capacidadeMax,
-    );
-    bombeado[t] = r.qb;
+      retiradaPrevia, podeDesligar: t % PASSOS_POR_DESLIGAMENTO === 0,
+    });
+    retiradaPrevia = r.retirada;
+    ociosa[t] = r.maquinaOciosa;
+    bombeado[t] = r.bombeamento;
+    revertido[t] = r.reversao;
     vertido[t] = r.qv;
     reduzido[t] = r.contido;
     forcado[t] = r.forcado;
@@ -260,7 +376,7 @@ function simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volum
     // silêncio.
     volumes[t + 1] = volumes[t] + (hidrograma[t] - r.qb - r.qv) * HM3_POR_M3S;
   }
-  return { volumes, bombeado, vertido, comandado, reduzido, barrado, forcado };
+  return { volumes, bombeado, revertido, vertido, comandado, reduzido, barrado, forcado, ociosa };
 }
 
 /**
@@ -290,16 +406,19 @@ function requisitoSemRampa(cav, hidrograma, volumeInicial, conjuntos, volumeTeto
   const n = hidrograma.length;
   const q = new Array(n).fill(0);
   let volume = volumeInicial;
+  let retiradaPrevia = null;
   for (let t = 0; t < n; t++) {
     const cota = cotaDoVolume(cav, volume);
     const necessario = Math.max(
       0,
       (volume - volumeTeto) / HM3_POR_M3S + hidrograma[t] - bombeamentoNaCota(conjuntos, cota),
     );
-    const { qb, qv } = repartirSaida(
-      bombeamentoNaCota(conjuntos, cota), Math.min(necessario, capacidadeMax),
-      volume, hidrograma[t], volumePiso, volumeTeto, capacidadeMax,
-    );
+    const { qb, qv, retirada } = repartirSaida({
+      conjuntos, cota, vertProgramado: Math.min(necessario, capacidadeMax),
+      volume, qaf: hidrograma[t], volumePiso, volumeTeto, capacidadeMax,
+      retiradaPrevia, podeDesligar: t % PASSOS_POR_DESLIGAMENTO === 0,
+    });
+    retiradaPrevia = retirada;
     q[t] = qv;
     volume += (hidrograma[t] - qb - qv) * HM3_POR_M3S;
   }
@@ -395,7 +514,8 @@ export function amortecerCheia(cfg) {
     portoes: vertedouro.portoes || {},
   };
   const estado = simularCom(
-    cav, hidrograma, volumeInicial, conjuntos, vertimento, volumePiso, volumeTeto, capacidadeMax, manobra,
+    cav, hidrograma, volumeInicial, conjuntos, vertimento,
+    volumePiso, volumeTeto, capacidadeMax, manobra,
   );
 
   return montar({
@@ -442,7 +562,12 @@ function montar({ cav, hidrograma, vertimento, programado, estado, dataInicial, 
       passo: t,
       dataHora: new Date(dataInicial.getTime() + t * PASSO_SEGUNDOS * 1000).toISOString(),
       qaf: hidrograma[i],
+      // Vigário bombeia; Santa Cecília reverte para o Paraíba. As duas são
+      // defluência de Santana, mas são operações distintas e aparecem
+      // separadas em toda a tela.
       qbomb: estado.bombeado[i],
+      qrev: estado.revertido[i],
+      qretirada: estado.bombeado[i] + estado.revertido[i],
       qvert: vertimento[i],
       // O valor comandado na comporta. O efetivo pode ficar abaixo dele
       // quando o piso de emergência corta a retirada — é o programado que
@@ -451,7 +576,7 @@ function montar({ cav, hidrograma, vertimento, programado, estado, dataInicial, 
       // A parte do vertimento que o teto impôs, acima do que a comporta
       // comandada entregava.
       qvertForcado: estado.forcado[i],
-      qsaida: estado.bombeado[i] + vertimento[i],
+      qsaida: estado.bombeado[i] + estado.revertido[i] + vertimento[i],
       retiradaReduzida: !!estado.reduzido[i],
       volume,
       cota,
@@ -464,12 +589,9 @@ function montar({ cav, hidrograma, vertimento, programado, estado, dataInicial, 
     });
   }
 
-  // Auditoria da ordem dos recursos: o vertimento é o último a entrar, então
-  // em nenhum passo com comporta aberta o bombeamento pode estar abaixo do
-  // que a cota permite.
-  const bombeamentoNoMaximoAoVerter = !serie.some(
-    (s) => s.qvert > 1e-9 && s.qbomb < s.bombeamentoDisponivel - 1e-9,
-  );
+  // Ordem dos recursos: o vertimento é o último a entrar. A marcação vem da
+  // própria simulação, passo a passo — ver maquinaOciosa em repartirSaida.
+  const bombeamentoNoMaximoAoVerter = !estado.ociosa.some(Boolean);
 
   // A comporta abre antes de a afluência superar o bombeamento — não porque
   // sobre bomba, mas porque o degrau de manobra exige antecedência. Medir
@@ -563,6 +685,9 @@ function montar({ cav, hidrograma, vertimento, programado, estado, dataInicial, 
       qafPico: Math.max(...hidrograma),
       volumeAfluente: hidrograma.reduce((s, q) => s + q * HM3_POR_M3S, 0),
       volumeBombeado: estado.bombeado.reduce((s, q) => s + q * HM3_POR_M3S, 0),
+      volumeRevertido: estado.revertido.reduce((s, q) => s + q * HM3_POR_M3S, 0),
+      bombeamentoMaquina: Math.max(0, ...estado.bombeado),
+      reversaoMaquina: Math.max(0, ...estado.revertido),
       volumeVertido: vertimento.reduce((s, q) => s + q * HM3_POR_M3S, 0),
       bombeamentoMinimo: Math.min(...serie.map((s) => s.bombeamentoDisponivel)),
       bombeamentoMaximo: Math.max(...serie.map((s) => s.bombeamentoDisponivel)),

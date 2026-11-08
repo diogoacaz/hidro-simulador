@@ -57,6 +57,7 @@ function cores() {
     qdef: escuro ? '#d95926' : '#eb6834',
     volume: escuro ? '#9085e9' : '#6250d6',
     area: escuro ? '#2bb3cc' : '#0e7490',
+    reversao: escuro ? '#1f9aa8' : '#0e8f9e',
 
     operacional: varCss('--texto-suave', escuro ? '#8aa39c' : '#5a6e67'),
     emergencial: varCss('--critico', escuro ? '#f87171' : '#dc2626'),
@@ -834,13 +835,15 @@ export function graficoCheia(canvasId, serie, limites = {}) {
   const vertido = serieLinha('Vertido (m³/s)', pontos.map((p) => p.qvert), c.qdef);
   vertido.yAxisID = 'yVazao';
 
+  // Bombeado e revertido saem os dois de Santana, mas são operações
+  // distintas. A linha de "disponível na cota" saiu: com máquina de
+  // velocidade fixa, o bombeado já É o disponível, salvo quando a cota
+  // tira Vigário de operação — e isso a própria linha mostra, caindo a zero.
   const bombeado = serieLinha('Bombeado (m³/s)', pontos.map((p) => p.qbomb), c.volume);
   bombeado.yAxisID = 'yBomba';
-  const disponivel = serieLinha('Disponível na cota (m³/s)',
-    pontos.map((p) => p.bombeamentoDisponivel), c.volume, { preencher: false });
-  disponivel.yAxisID = 'yBomba';
-  disponivel.borderDash = [5, 4];
-  disponivel.borderWidth = 1.5;
+  const revertido = serieLinha('Revertido (m³/s)', pontos.map((p) => p.qrev), c.reversao,
+    { preencher: false });
+  revertido.yAxisID = 'yBomba';
 
   opcoes.plugins.paineis = {
     divisor: rgba(c.suave, escuro ? 0.3 : 0.22),
@@ -860,11 +863,11 @@ export function graficoCheia(canvasId, serie, limites = {}) {
           { nome: 'Vertido', cor: c.qdef, indice: 2 },
         ] },
       { eixo: 'yBomba',
-        nome: 'Bombeamento',
+        nome: 'Bombeamento e reversão',
         unidade: 'm³/s',
         series: [
-          { nome: 'Bombeado', cor: c.volume, indice: 3 },
-          { nome: 'Disponível na cota', cor: c.volume, tracejado: [5, 4], indice: 4 },
+          { nome: 'Bombeado · Vigário', cor: c.volume, indice: 3 },
+          { nome: 'Revertido · Santa Cecília', cor: c.reversao, indice: 4 },
         ] },
     ],
   };
@@ -873,7 +876,7 @@ export function graficoCheia(canvasId, serie, limites = {}) {
     type: 'line',
     data: {
       labels: rotularPontos(pontos),
-      datasets: [nivel, afluente, vertido, bombeado, disponivel],
+      datasets: [nivel, afluente, vertido, bombeado, revertido],
     },
     options: opcoes,
   });
