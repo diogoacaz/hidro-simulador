@@ -647,7 +647,7 @@ tr.violacao-atencao td { background: color-mix(in srgb, var(--atencao) 7%, trans
 .grafico-caixa.alta { height: 380px; }
 
 /* Três painéis empilhados precisam de altura para cada um respirar. */
-.grafico-caixa.cheia { height: 690px; }
+.grafico-caixa.cheia { height: 740px; }
 
 /* ---------- Diversos ---------- */
 
@@ -1039,7 +1039,7 @@ a { color: inherit; text-decoration: none; }
   .grade-2, .grade-3, .grade-4 { grid-template-columns: 1fr; max-width: none; }
   .grafico-caixa { height: 255px; }
   .grafico-caixa.alta { height: 300px; }
-  .grafico-caixa.cheia { height: 580px; }
+  .grafico-caixa.cheia { height: 630px; }
   .graficos-par { grid-template-columns: 1fr; }
   .hero { padding: 20px 18px; }
   .metricas { grid-template-columns: 1fr; }

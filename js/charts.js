@@ -238,8 +238,8 @@ const pluginLimites = {
 // Altura reservada no alto de cada painel. O título não encosta na divisa:
 // entre ela e ele fica um vão, senão o título do painel de baixo se lê como
 // rótulo do eixo do painel de cima.
-const VAO_ANTES_DO_TITULO = 26;
-const ALTURA_CABECALHO = 58;
+const VAO_ANTES_DO_TITULO = 10;
+const ALTURA_CABECALHO = 42;
 
 const pluginPaineis = {
   id: 'paineis',
@@ -273,17 +273,6 @@ const pluginPaineis = {
     for (const painel of lista) {
       const y = scales[painel.eixo];
       if (!y) continue;
-
-      // Um fio entre painéis, para a divisa não depender de perceber que a
-      // escala mudou.
-      if (y.top > chartArea.top + 1) {
-        ctx.beginPath();
-        ctx.strokeStyle = opts.divisor;
-        ctx.lineWidth = 1;
-        ctx.moveTo(chartArea.left, Math.round(y.top) + 0.5);
-        ctx.lineTo(chartArea.right, Math.round(y.top) + 0.5);
-        ctx.stroke();
-      }
 
       const visiveis = painel.series.filter(
         (serie) => serie.indice == null || !chart.getDatasetMeta(serie.indice).hidden,
@@ -474,6 +463,16 @@ function opcoesBase({ titulo, tituloEixoY, pontos, legenda = false, unidade = ''
       x: {
         border: { display: false },
         grid: { display: false },
+        // `maxTicksLimit: 7` é demais num telefone: sete rótulos de
+        // "08/11 03:23" pedem quase 500 px e se encavalam em 390. O limite
+        // sai da largura real, sem rodar o texto.
+        afterBuildTicks(eixo) {
+          const util = Math.max(120, eixo.chart.width - 70);
+          const cabem = Math.max(2, Math.min(7, Math.floor(util / 95)));
+          if (eixo.ticks.length <= cabem) return;
+          const salto = Math.ceil(eixo.ticks.length / cabem);
+          eixo.ticks = eixo.ticks.filter((_, i) => i % salto === 0);
+        },
         ticks: {
           maxTicksLimit: 7, autoSkip: true, maxRotation: 0,
           color: c.suave, font: { ...FONTE, size: 10 }, padding: 6,
@@ -794,15 +793,37 @@ export function graficoCheia(canvasId, serie, limites = {}) {
   if (Number.isFinite(nivelMaximo)) faixaNivel.suggestedMax = nivelMaximo + folga;
   if (Number.isFinite(nivelMinimo)) faixaNivel.suggestedMin = nivelMinimo - folga;
 
+  // Eixos vazios entre os painéis. O empilhamento do Chart.js não tem vão:
+  // o pé de um painel é o topo do outro. Um eixo sem série, sem marcas e sem
+  // grade ocupa o seu peso na pilha e não desenha nada — é o espaço em
+  // branco que separa os três.
+  const vao = () => ({
+    // Sem série atrelada o Chart.js não deduz nem o tipo nem o lado.
+    type: 'linear',
+    position: 'left',
+    axis: 'y',
+    stack: 'cheia',
+    stackWeight: 1,
+    min: 0,
+    max: 1,
+    display: true,
+    border: { display: false },
+    grid: { display: false, drawTicks: false },
+    ticks: { display: false },
+    afterFit(escala) { escala.width = 52; },
+  });
+
   opcoes.scales = {
     x: opcoes.scales.x,
     // A folga é maior onde o painel é mais baixo: o cabeçalho tem altura
     // fixa, a faixa do painel não.
-    yBomba: eixo(2.4, { ocultarMaximo: true, marcas: 4, folgaNoAlto: 0.62 }),
-    yVazao: eixo(4, { ocultarMinimo: true, ocultarMaximo: true, marcas: 7, folgaNoAlto: 0.24 }),
+    yBomba: eixo(2.4, { ocultarMaximo: true, marcas: 4, folgaNoAlto: 0.42 }),
+    vaoB: vao(),
+    yVazao: eixo(4, { ocultarMinimo: true, ocultarMaximo: true, marcas: 7, folgaNoAlto: 0.16 }),
+    vaoA: vao(),
     // Mais marcas no nível: a faixa útil tem pouco mais de 2 m e, com poucas
     // marcas, o passo salta para 2 m e a escala sobe muito acima do teto.
-    yNivel: eixo(3, { ocultarMinimo: true, faixa: faixaNivel, marcas: 6, folgaNoAlto: 0.36 }),
+    yNivel: eixo(3, { ocultarMinimo: true, faixa: faixaNivel, marcas: 6, folgaNoAlto: 0.24 }),
   };
 
   const nivel = serieLinha('Nível (m)', pontos.map((p) => p.cota), c.nivel);
