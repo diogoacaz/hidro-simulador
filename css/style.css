@@ -242,6 +242,7 @@ body {
    colunas fixas dão duas linhas cheias, e o limite de largura evita campos
    absurdamente largos para um número de três dígitos. */
 .grade-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); max-width: 780px; }
+.grade-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); max-width: 1040px; }
 
 label {
   display: flex;
@@ -336,6 +337,8 @@ fieldset {
   margin: 0;
   padding: 20px 0 0;
 }
+
+fieldset + fieldset { margin-top: 18px; }
 
 legend {
   padding: 0;
@@ -637,6 +640,9 @@ tr.violacao-atencao td { background: color-mix(in srgb, var(--atencao) 7%, trans
 .graficos > .grafico-caixa:first-child { border-top: none; padding-top: 4px; }
 .grafico-caixa.alta { height: 380px; }
 
+/* Três painéis empilhados precisam de altura para cada um respirar. */
+.grafico-caixa.cheia { height: 560px; }
+
 /* ---------- Diversos ---------- */
 
 .carregando {
@@ -895,6 +901,32 @@ a { color: inherit; text-decoration: none; }
   font-variant-numeric: tabular-nums;
 }
 
+/* Os três cenários do fim: um bloco por incerteza, lado a lado quando cabe. */
+.cenarios { display: grid; gap: 2px; margin-top: 14px; }
+
+.cenario { border-top: 1px solid var(--linha); }
+.cenario:last-child { border-bottom: 1px solid var(--linha); }
+
+.cenario > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 13px 2px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--texto);
+}
+
+.cenario > summary span {
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--texto-suave);
+}
+
+.cenario[open] > summary { color: var(--acento-tinta); }
+.cenario > div { padding-bottom: 16px; }
+
 .serie-completa {
   margin-top: 18px;
   padding-top: 2px;
@@ -1002,9 +1034,10 @@ a { color: inherit; text-decoration: none; }
   .painel { padding: 20px 17px; }
   .tabela-scroll { margin: 0 -17px; padding: 0 17px; }
   .grade { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
-  .grade-2, .grade-3 { grid-template-columns: 1fr; max-width: none; }
+  .grade-2, .grade-3, .grade-4 { grid-template-columns: 1fr; max-width: none; }
   .grafico-caixa { height: 255px; }
   .grafico-caixa.alta { height: 300px; }
+  .grafico-caixa.cheia { height: 460px; }
   .graficos-par { grid-template-columns: 1fr; }
   .hero { padding: 20px 18px; }
   .metricas { grid-template-columns: 1fr; }

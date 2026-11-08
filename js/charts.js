@@ -217,8 +217,83 @@ const pluginLimites = {
       ctx.stroke();
       ctx.setLineDash([]);
 
+      ctx.fillStyle = opts.superficie;
+      ctx.globalAlpha = 0.85;
+      ctx.fillRect(x - 3, py - 7, larg + 6, 14);
+      ctx.globalAlpha = 1;
       ctx.fillStyle = l.cor;
       ctx.fillText(texto, x, py);
+    }
+    ctx.restore();
+  },
+};
+
+// Painéis empilhados: um filete entre eles e uma legenda própria dentro de
+// cada um. Sem isto as três faixas se leem como um gráfico só e as escalas se
+// confundem — e a legenda global obrigaria a decorar cinco cores de uma vez.
+const pluginPaineis = {
+  id: 'paineis',
+  beforeDatasetsDraw(chart, _args, opts) {
+    const lista = opts && opts.lista;
+    if (!lista || !lista.length) return;
+    const { ctx, chartArea, scales } = chart;
+    if (!chartArea) return;
+
+    ctx.save();
+    for (const painel of lista) {
+      const y = scales[painel.eixo];
+      if (!y) continue;
+      if (painel.fundo) {
+        ctx.fillStyle = painel.fundo;
+        ctx.fillRect(chartArea.left, y.top, chartArea.right - chartArea.left, y.bottom - y.top);
+      }
+    }
+    ctx.restore();
+  },
+  afterDatasetsDraw(chart, _args, opts) {
+    const lista = opts && opts.lista;
+    if (!lista || !lista.length) return;
+    const { ctx, chartArea, scales } = chart;
+    if (!chartArea) return;
+
+    ctx.save();
+    ctx.textBaseline = 'middle';
+    for (const painel of lista) {
+      const y = scales[painel.eixo];
+      if (!y) continue;
+      if (y.top > chartArea.top + 1) {
+        ctx.beginPath();
+        ctx.strokeStyle = opts.divisor;
+        ctx.lineWidth = 1;
+        ctx.moveTo(chartArea.left, Math.round(y.top) + 0.5);
+        ctx.lineTo(chartArea.right, Math.round(y.top) + 0.5);
+        ctx.stroke();
+      }
+      let x = chartArea.left + 10;
+      const cy = y.top + 13;
+
+      for (const serie of painel.series) {
+        const oculta = serie.indice != null && chart.getDatasetMeta(serie.indice).hidden;
+        if (oculta) continue;
+        ctx.strokeStyle = serie.cor;
+        ctx.lineWidth = 2;
+        ctx.setLineDash(serie.tracejado || []);
+        ctx.beginPath();
+        ctx.moveTo(x, cy);
+        ctx.lineTo(x + 14, cy);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        x += 19;
+
+        ctx.font = `600 10px ${FONTE.family}`;
+        ctx.fillStyle = opts.tinta;
+        ctx.fillText(serie.nome, x, cy);
+        x += ctx.measureText(serie.nome).width + 14;
+      }
+
+      ctx.font = `500 10px ${FONTE.family}`;
+      ctx.fillStyle = opts.suave;
+      ctx.fillText(painel.unidade, x, cy);
     }
     ctx.restore();
   },
@@ -421,7 +496,7 @@ function criarGrafico(canvasId, config) {
   destruir(canvasId);
   const canvas = document.getElementById(canvasId);
   if (!canvas) return null;
-  config.plugins = [pluginFaixas, pluginLimites, pluginCruz, pluginRotulosFim];
+  config.plugins = [pluginFaixas, pluginPaineis, pluginLimites, pluginCruz, pluginRotulosFim];
   const grafico = new Chart(canvas.getContext('2d'), config);
   graficos.set(canvasId, grafico);
   return grafico;
@@ -600,204 +675,139 @@ export function graficoCav(canvasVolumeId, canvasAreaId, cav) {
  * cada um fica com uma ou duas séries e a leitura melhora.
  * ------------------------------------------------------------------ */
 
-/** Vertimento × tempo, com a linha do limite que começa a alagar. */
-export function graficoVertimento(canvasId, serie, limiteSemDano) {
-  refazer.set(canvasId, () => graficoVertimento(canvasId, serie, limiteSemDano));
-  const pontos = amostrar(serie);
-  const c = cores();
-
-  const opcoes = opcoesBase({
-    titulo: 'Vertimento × tempo', tituloEixoY: 'Vazão vertida (m³/s)', pontos, unidade: 'm³/s',
-  });
-  if (Number.isFinite(limiteSemDano)) {
-    opcoes.plugins.limites = {
-      lista: [{ rotulo: 'início do alagamento', valor: limiteSemDano, cor: c.emergencial }],
-      superficie: c.superficie,
-    };
-    // A faixa sem dano fica sombreada: é nela que a operação quer ficar.
-    opcoes.plugins.faixas = {
-      lista: [{ de: 0, ate: limiteSemDano, cor: rgba(c.nivel, temaEscuro.matches ? 0.06 : 0.09) }],
-    };
-  }
-
-  return criarGrafico(canvasId, {
-    type: 'line',
-    data: {
-      labels: rotularPontos(pontos),
-      datasets: [serieLinha('Vertido (m³/s)', pontos.map((p) => p.qvert), c.qdef)],
-    },
-    options: opcoes,
-  });
-}
 
 /**
- * Afluência contra vertimento, no mesmo eixo de tempo e na mesma escala.
+ * A cheia inteira num gráfico: três painéis empilhados sobre o mesmo eixo de
+ * tempo — nível, vazões e bombeamento.
  *
- * É o gráfico do amortecimento: quanto entra, quanto sai pela comporta, e o
- * atraso entre os dois picos. Escala única de propósito — a diferença entre
- * as duas alturas É a informação. Azul × âmbar é o par validado para duas
- * séries, e a linha de alagamento entra como referência, não como série.
+ * Substitui seis gráficos que repetiam os mesmos dados: o vertimento
+ * aparecia em quatro deles, o nível em dois, a afluência em três. Empilhados
+ * e alinhados, a leitura é vertical e responde de uma vez às três perguntas
+ * da operação: o nível segurou, quanto precisei verter, e as bombas deram
+ * conta.
+ *
+ * Painéis separados porque as unidades diferem (cota em metros, vazões em
+ * m³/s) e porque dentro de cada um cabem no máximo duas séries, que é o
+ * limite para as cores se distinguirem com segurança.
  */
-export function graficoAfluenteVertimento(canvasId, serie, limiteSemDano) {
-  refazer.set(canvasId, () => graficoAfluenteVertimento(canvasId, serie, limiteSemDano));
+export function graficoCheia(canvasId, serie, limites = {}) {
+  refazer.set(canvasId, () => graficoCheia(canvasId, serie, limites));
   const pontos = amostrar(serie);
   const c = cores();
-
-  const opcoes = opcoesBase({
-    titulo: 'Afluência × vertimento', tituloEixoY: 'Vazão (m³/s)', pontos,
-    legenda: true, unidade: 'm³/s',
-  });
-  if (Number.isFinite(limiteSemDano)) {
-    opcoes.plugins.limites = {
-      lista: [{ rotulo: 'início do alagamento', valor: limiteSemDano, cor: c.emergencial }],
-      superficie: c.superficie,
-    };
-  }
-
-  return criarGrafico(canvasId, {
-    type: 'line',
-    data: {
-      labels: rotularPontos(pontos),
-      datasets: [
-        serieLinha('Afluente (m³/s)', pontos.map((p) => p.qaf), c.qaf, { preencher: false }),
-        serieLinha('Vertido (m³/s)', pontos.map((p) => p.qvert), c.qdef),
-      ],
-    },
-    options: opcoes,
-  });
-}
-
-/** Afluência contra retirada total (bombeamento + vertimento). */
-export function graficoAfluenteSaida(canvasId, serie) {
-  refazer.set(canvasId, () => graficoAfluenteSaida(canvasId, serie));
-  const pontos = amostrar(serie);
-  const c = cores();
-  return criarGrafico(canvasId, {
-    type: 'line',
-    data: {
-      labels: rotularPontos(pontos),
-      datasets: [
-        serieLinha('Afluente (m³/s)', pontos.map((p) => p.qaf), c.qaf, { preencher: false }),
-        serieLinha('Retirada total (m³/s)', pontos.map((p) => p.qsaida), c.qdef, { preencher: false }),
-      ],
-    },
-    options: opcoesBase({
-      titulo: 'Afluência × retirada', tituloEixoY: 'Vazão (m³/s)', pontos,
-      legenda: true, unidade: 'm³/s',
-    }),
-  });
-}
-
-/** Bombeamento efetivo contra o disponível na cota — mostra onde a captação para. */
-export function graficoBombeamento(canvasId, serie) {
-  refazer.set(canvasId, () => graficoBombeamento(canvasId, serie));
-  const pontos = amostrar(serie);
-  const c = cores();
-  const disponivel = serieLinha('Disponível na cota (m³/s)',
-    pontos.map((p) => p.bombeamentoDisponivel), c.nivel, { preencher: false });
-  disponivel.borderDash = [5, 4];
-  disponivel.borderWidth = 1.5;
-  disponivel.semRotuloFim = true;
-
-  return criarGrafico(canvasId, {
-    type: 'line',
-    data: {
-      labels: rotularPontos(pontos),
-      datasets: [serieLinha('Bombeado (m³/s)', pontos.map((p) => p.qbomb), c.nivel), disponivel],
-    },
-    options: opcoesBase({
-      titulo: 'Bombeamento × tempo', tituloEixoY: 'Vazão bombeada (m³/s)', pontos,
-      legenda: true, unidade: 'm³/s',
-    }),
-  });
-}
-
-/**
- * Nível e vertimento no mesmo eixo de tempo, em dois painéis empilhados.
- *
- * Cota (≈360 m) e vazão (0–100 m³/s) não cabem numa escala só — o nível
- * viraria uma reta. E eixo duplo é pior: o alinhamento entre as duas escalas
- * é arbitrário e sugere uma correlação que o dado não tem.
- *
- * A solução correta para grandezas de unidades diferentes é empilhar painéis
- * compartilhando o eixo do tempo, de modo que a leitura seja vertical: o que
- * aconteceu com o nível no instante em que a comporta abriu está logo acima.
- * Chart.js faz isso com escalas empilhadas (`stack` + `stackWeight`), num
- * canvas só, o que garante o alinhamento e mantém um tooltip único.
- */
-export function graficoNivelVertimento(canvasId, serie, limites = {}) {
-  refazer.set(canvasId, () => graficoNivelVertimento(canvasId, serie, limites));
-  const pontos = amostrar(serie);
-  const c = cores();
+  const escuro = temaEscuro.matches;
   const { nivelMaximo, nivelMinimo, limiteSemDano } = limites;
 
-  const opcoes = opcoesBase({
-    titulo: 'Nível × vertimento', tituloEixoY: '', pontos, legenda: true,
-  });
+  const opcoes = opcoesBase({ titulo: '', tituloEixoY: '', pontos, legenda: false });
+  opcoes.plugins.title.display = false;
+  // A legenda de cada painel fica dentro dele; não há rótulo no fim da linha
+  // nem legenda geral, que misturaria as três escalas numa fileira só.
+  opcoes.plugins.rotulosFim = { ativo: false };
+  opcoes.layout.padding = { top: 4, right: 16, bottom: 0, left: 0 };
 
-  // O tooltip precisa da unidade por série: os dois painéis medem coisas
-  // diferentes.
   opcoes.plugins.tooltip.callbacks.label = (item) => {
-    const metros = item.dataset.yAxisID === 'yNivel';
-    const casas = metros ? 2 : 1;
+    const eixo = item.dataset.yAxisID;
+    const casas = eixo === 'yNivel' ? 2 : 1;
     const v = item.parsed.y;
     const texto = Number.isFinite(v)
       ? v.toLocaleString('pt-BR', { minimumFractionDigits: casas, maximumFractionDigits: casas })
       : '—';
-    return ` ${item.dataset.label.replace(/\s*\(.*\)\s*$/, '')}  ${texto} ${metros ? 'm' : 'm³/s'}`;
+    return ` ${item.dataset.label.replace(/\s*\(.*\)\s*$/, '')}  ${texto} ${eixo === 'yNivel' ? 'm' : 'm³/s'}`;
   };
 
   const linhas = [];
-  if (Number.isFinite(nivelMaximo)) {
-    linhas.push({ rotulo: 'máximo', valor: nivelMaximo, cor: c.emergencial, eixo: 'yNivel' });
-  }
-  if (Number.isFinite(nivelMinimo)) {
-    linhas.push({ rotulo: 'mínimo', valor: nivelMinimo, cor: c.emergencial, eixo: 'yNivel' });
-  }
-  if (Number.isFinite(limiteSemDano)) {
-    linhas.push({ rotulo: 'alaga', valor: limiteSemDano, cor: c.emergencial, eixo: 'yVert' });
-  }
+  if (Number.isFinite(nivelMaximo)) linhas.push({ rotulo: 'teto', valor: nivelMaximo, cor: c.emergencial, eixo: 'yNivel' });
+  if (Number.isFinite(nivelMinimo)) linhas.push({ rotulo: 'piso', valor: nivelMinimo, cor: c.emergencial, eixo: 'yNivel' });
+  if (Number.isFinite(limiteSemDano)) linhas.push({ rotulo: 'alaga', valor: limiteSemDano, cor: c.emergencial, eixo: 'yVazao' });
   opcoes.plugins.limites = { lista: linhas, superficie: c.superficie };
-  if (Number.isFinite(nivelMaximo) || Number.isFinite(nivelMinimo)) {
+  if (Number.isFinite(nivelMaximo) && Number.isFinite(nivelMinimo)) {
     opcoes.plugins.faixas = {
-      lista: [{
-        de: nivelMinimo, ate: nivelMaximo, eixo: 'yNivel',
-        cor: rgba(c.nivel, temaEscuro.matches ? 0.05 : 0.07),
-      }],
+      lista: [{ de: nivelMinimo, ate: nivelMaximo, eixo: 'yNivel',
+        cor: rgba(c.nivel, escuro ? 0.05 : 0.07) }],
     };
   }
 
-  const eixoY = (titulo, peso, ocultarMinimo = false) => ({
-    stack: 'paineis',
+  // A ordem das chaves é a de baixo para cima: o nível, que é a restrição,
+  // fica no topo; o bombeamento, que é o recurso, na base.
+  const eixo = (peso, extras = {}) => ({
+    ...(extras.faixa || {}),
+    stack: 'cheia',
     stackWeight: peso,
     border: { display: false },
     grid: { color: c.grade, drawTicks: false, lineWidth: 1 },
     ticks: {
-      color: c.suave, font: { ...FONTE, size: 10 }, padding: 10, maxTicksLimit: 4,
-      // Na junção dos painéis a marca de baixo de um encosta na de cima do
-      // outro; a do painel superior é suprimida porque o zero se subentende.
+      color: c.suave, font: { ...FONTE, size: 10 }, padding: 10, maxTicksLimit: extras.marcas || 4,
+      maxRotation: 0,
       callback(v) {
-        if (ocultarMinimo && v === this.min) return '';
+        // Na fronteira entre dois painéis o topo de um encosta no piso do
+        // outro: um dos dois números sempre sai, ou a leitura troca de escala
+        // sem avisar.
+        if (extras.ocultarMinimo && v === this.min) return '';
+        if (extras.ocultarMaximo && v === this.max) return '';
         return Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
       },
     },
-    title: { display: true, text: titulo, color: c.suave, font: { ...FONTE, size: 10 } },
+    title: { display: false },
+    afterFit(escala) { escala.width = 52; },
   });
+
+  // O teto e o piso de emergência são a razão do gráfico: a escala do nível
+  // é forçada a contê-los, ainda que a cota simulada fique longe deles.
+  const folga = Number.isFinite(nivelMaximo) && Number.isFinite(nivelMinimo)
+    ? Math.max(0.08, (nivelMaximo - nivelMinimo) * 0.08) : 0;
+  const faixaNivel = {};
+  if (Number.isFinite(nivelMaximo)) faixaNivel.suggestedMax = nivelMaximo + folga;
+  if (Number.isFinite(nivelMinimo)) faixaNivel.suggestedMin = nivelMinimo - folga;
 
   opcoes.scales = {
     x: opcoes.scales.x,
-    yNivel: eixoY('Cota (m)', 3),
-    yVert: eixoY('Vertido (m³/s)', 2, true),
+    yBomba: eixo(2, { ocultarMaximo: true, marcas: 3 }),
+    yVazao: eixo(4, { ocultarMinimo: true, ocultarMaximo: true, marcas: 5 }),
+    yNivel: eixo(3, { ocultarMinimo: true, faixa: faixaNivel }),
   };
 
   const nivel = serieLinha('Nível (m)', pontos.map((p) => p.cota), c.nivel);
   nivel.yAxisID = 'yNivel';
-  const vert = serieLinha('Vertido (m³/s)', pontos.map((p) => p.qvert), c.qdef);
-  vert.yAxisID = 'yVert';
+
+  const afluente = serieLinha('Afluente (m³/s)', pontos.map((p) => p.qaf), c.qaf, { preencher: false });
+  afluente.yAxisID = 'yVazao';
+  const vertido = serieLinha('Vertido (m³/s)', pontos.map((p) => p.qvert), c.qdef);
+  vertido.yAxisID = 'yVazao';
+
+  const bombeado = serieLinha('Bombeado (m³/s)', pontos.map((p) => p.qbomb), c.volume);
+  bombeado.yAxisID = 'yBomba';
+  const disponivel = serieLinha('Disponível na cota (m³/s)',
+    pontos.map((p) => p.bombeamentoDisponivel), c.volume, { preencher: false });
+  disponivel.yAxisID = 'yBomba';
+  disponivel.borderDash = [5, 4];
+  disponivel.borderWidth = 1.5;
+
+  opcoes.plugins.paineis = {
+    divisor: escuro ? rgba(c.suave, 0.45) : rgba(c.suave, 0.3),
+    tinta: c.texto,
+    suave: c.suave,
+    lista: [
+      { eixo: 'yNivel', unidade: 'm', series: [{ nome: 'Nível do reservatório', cor: c.nivel, indice: 0 }] },
+      { eixo: 'yVazao',
+        unidade: 'm³/s',
+        series: [
+          { nome: 'Afluente', cor: c.qaf, indice: 1 },
+          { nome: 'Vertido', cor: c.qdef, indice: 2 },
+        ] },
+      { eixo: 'yBomba',
+        unidade: 'm³/s',
+        series: [
+          { nome: 'Bombeado', cor: c.volume, indice: 3 },
+          { nome: 'Disponível na cota', cor: c.volume, tracejado: [5, 4], indice: 4 },
+        ] },
+    ],
+  };
 
   return criarGrafico(canvasId, {
     type: 'line',
-    data: { labels: rotularPontos(pontos), datasets: [nivel, vert] },
+    data: {
+      labels: rotularPontos(pontos),
+      datasets: [nivel, afluente, vertido, bombeado, disponivel],
+    },
     options: opcoes,
   });
 }

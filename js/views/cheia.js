@@ -9,7 +9,7 @@
 import * as db from '../db.js';
 import { limitesCav } from '../cav.js';
 import { amortecerCheia, hidrogramaCheia, cenariosDeBombeamento, cronogramaDeManobras, custoDoAtraso } from '../cheia.js';
-import { graficoNivel, graficoNivelVertimento, graficoAfluenteVertimento, graficoVertimento, graficoAfluenteSaida, graficoBombeamento } from '../charts.js';
+import { graficoCheia } from '../charts.js';
 import { $, $$, esc, num, toast, comBotao, valorNumerico, paraInputDateTime } from '../ui.js';
 import { lerListaNumeros, baixarCsv } from '../planilha.js';
 
@@ -98,25 +98,28 @@ export async function render(container) {
               <input type="radio" name="fonte" value="serie" style="width:auto" /> Série medida
             </label>
           </div>
-          <div class="grade grade-3" id="caixa-triangular">
-            <label>Vazão de base (m³/s)<input type="number" id="qBase" value="3" step="0.1" /></label>
-            <label>Pico (m³/s)<input type="number" id="qPico" value="650" step="1" /></label>
-            <label>Subida até o pico (h)<input type="number" id="hSubida" value="9" step="0.25" /></label>
-            <label>Recessão: tempo até a metade (h)
-              <input type="number" id="hRecessao" value="7" step="0.25" />
-              <small>Da vazão de pico até metade dela.</small>
-            </label>
-            <label>Recessão: tempo até 10% (h)
-              <input type="number" id="hDecimo" value="17" step="0.5" />
-              <small id="info-cauda"></small>
-            </label>
-            <label>Antes do evento (h)<input type="number" id="hAntes" value="1" step="0.25" /></label>
-            <label>Cauda simulada (h)<input type="number" id="hDepois" value="48" step="1" /></label>
+          <div id="caixa-triangular">
+            <div class="grade grade-3">
+              <label>Vazão de base (m³/s)<input type="number" id="qBase" value="3" step="0.1" /></label>
+              <label>Pico (m³/s)<input type="number" id="qPico" value="650" step="1" /></label>
+              <label>Subida até o pico (h)<input type="number" id="hSubida" value="9" step="0.25" /></label>
+            </div>
+            <details class="ajuste-fino">
+              <summary>Forma da cauda e janela simulada</summary>
+              <div class="grade grade-4">
+                <label>Recessão: até a metade (h)<input type="number" id="hRecessao" value="7" step="0.25" /></label>
+                <label>Recessão: até 10% (h)
+                  <input type="number" id="hDecimo" value="17" step="0.5" />
+                  <small id="info-cauda"></small>
+                </label>
+                <label>Antes do evento (h)<input type="number" id="hAntes" value="1" step="0.25" /></label>
+                <label>Cauda simulada (h)<input type="number" id="hDepois" value="48" step="1" /></label>
+              </div>
+              <p class="ajuda">Medianas de 478 dias de afluência medida em Santana (16 cheias acima de
+              80 m³/s, ajuste sobre as dez maiores). Quanto mais próximos os dois tempos, mais abrupto
+              o corte da cauda.</p>
+            </details>
           </div>
-          <p class="ajuda" style="margin-top:4px">A forma vem de 478 dias de afluência medida em Santana
-          (16 cheias acima de 80 m³/s), ajustada aos dez maiores. Os dois tempos de recessão definem o
-          formato da cauda: quanto mais próximos, mais abrupto o corte. Os valores acima são as
-          medianas medidas.</p>
           <label class="oculto" id="caixa-serie">Afluência de 15 em 15 min (m³/s)
             <textarea id="serieQaf" rows="4" placeholder="2,0&#10;5,5&#10;12,0"></textarea>
             <small id="info-serie"></small>
@@ -399,16 +402,9 @@ function htmlSaida({ resumo }, cfg) {
     ? ' — e o nível passou do teto. Abrir antes, ou liberar o vertimento maior numa cota mais baixa, evitaria isso.'
     : ', e ainda assim o nível se manteve dentro do teto.'}
         </p>` : ''}
-        ${resumo.precisaVerter ? `<p class="situacao-tipos">
-          ${resumo.bombeamentoNoMaximoAoVerter
-    ? 'O bombeamento fica no máximo que a cota permite durante todo o vertimento — a comporta é o último recurso.'
-    : '<strong>Atenção:</strong> há passos vertendo com bombeamento abaixo do disponível.'}
-          ${resumo.antecedenciaMin > 0
-    ? ` A comporta começa a abrir <strong>${num(resumo.antecedenciaMin / 60)} h antes</strong> de a afluência superar o bombeamento — não por sobrar bomba, mas porque o degrau de ${num(resumo.degrau)} m³/s a cada ${resumo.minutosPorDegrau} min precisa desse tempo para chegar ao pico. Esperar faria o nível passar do teto.`
-    : resumo.antecedenciaMin < 0
-      ? ` A comporta só abre <strong>${num(-resumo.antecedenciaMin / 60)} h depois</strong> de a afluência superar o bombeamento: nesse intervalo o próprio reservatório absorveu o excedente.`
-      : ''}
-        </p>` : ''}
+        ${resumo.precisaVerter && !resumo.bombeamentoNoMaximoAoVerter
+    ? '<p class="situacao-tipos"><strong>Atenção:</strong> há passos vertendo com bombeamento abaixo do disponível.</p>'
+    : ''}
       </div>
 
       <div class="metricas">
@@ -416,34 +412,22 @@ function htmlSaida({ resumo }, cfg) {
     item('Pico', `${num(resumo.picoVert)} m³/s`),
     item('No instante', hora(resumo.instantePico)),
     item('Volume vertido', `${num(resumo.volumeVertido, 2)} hm³`),
-  ])}
-        ${grupo(`Acima de ${num(resumo.limiteSemDano)} m³/s`, [
-    item('Duração', resumo.horasAcimaDoLimite ? `${num(resumo.horasAcimaDoLimite)} h` : 'não ocorre'),
-    item('A partir de', hora(resumo.inicioAcimaDoLimite)),
-    item('Volume excedente', `${num(resumo.volumeAcimaDoLimite, 2)} hm³`),
+    item(`Acima de ${num(resumo.limiteSemDano)} m³/s`,
+      resumo.horasAcimaDoLimite
+        ? `${num(resumo.horasAcimaDoLimite)} h · ${num(resumo.volumeAcimaDoLimite, 2)} hm³`
+        : 'não ocorre'),
   ])}
         ${grupo('Nível', [
     item('Início → máximo', `${num(resumo.cotaInicial)} → ${num(resumo.cotaMaxima)} m`),
-    item('Teto', `${num(resumo.nivelMaximo)} m`),
     item('Mínimo no período', `${num(resumo.cotaMinima)} m`),
+    item('Teto e piso', `${num(resumo.nivelMaximo)} / ${num(resumo.nivelMinimo)} m`),
   ])}
-        ${grupo('Bombeamento', [
+        ${grupo('Recursos e manobra', [
     item('Volume bombeado', `${num(resumo.volumeBombeado, 2)} hm³`),
-    item('Capacidade na cota', `${num(resumo.bombeamentoMinimo)} a ${num(resumo.bombeamentoMaximo)} m³/s`),
-    resumo.passosComRetiradaReduzida
-      ? item('Retirada reduzida', `${resumo.passosComRetiradaReduzida} passos, para não furar o mínimo`)
-      : '',
-  ].filter(Boolean))}
-        ${grupo('Manobra da comporta', [
-    item('Degrau', `${num(resumo.degrau)} m³/s a cada ${resumo.minutosPorDegrau} min`),
-    item('Manobras no evento', `${resumo.manobras}`),
-    resumo.portoes && (Number.isFinite(resumo.portoes.inicio) || Number.isFinite(resumo.portoes.liberaAcima))
-      ? item('Gatilhos de nível',
-        `${Number.isFinite(resumo.portoes.inicio) ? `abre em ${num(resumo.portoes.inicio)} m` : 'sem gatilho de abertura'}`
-        + `${Number.isFinite(resumo.portoes.liberaAcima) ? ` · libera em ${num(resumo.portoes.liberaAcima)} m` : ''}`)
-      : '',
+    item('Bombeamento na cota', `${num(resumo.bombeamentoMinimo)} a ${num(resumo.bombeamentoMaximo)} m³/s`),
+    item('Manobras', `${resumo.manobras} de ${num(resumo.degrau)} m³/s a cada ${resumo.minutosPorDegrau} min`),
     resumo.antecedenciaMin != null
-      ? item('Abertura × saturação das bombas',
+      ? item('Abertura × bombas no limite',
         resumo.antecedenciaMin > 0
           ? `${num(resumo.antecedenciaMin / 60)} h antes`
           : resumo.antecedenciaMin < 0
@@ -454,45 +438,39 @@ function htmlSaida({ resumo }, cfg) {
       </div>
 
       <div class="graficos">
-        <div class="grafico-caixa alta"><canvas id="g-cheia-nivel"></canvas></div>
-        <div class="grafico-caixa alta"><canvas id="g-cheia-amort"></canvas></div>
-        <div class="grafico-caixa alta"><canvas id="g-cheia-nivelvert"></canvas></div>
-        <div class="graficos-par">
-          <div class="grafico-caixa"><canvas id="g-cheia-vert"></canvas></div>
-          <div class="grafico-caixa"><canvas id="g-cheia-afl"></canvas></div>
-        </div>
-        <div class="graficos-par">
-          <div class="grafico-caixa"><canvas id="g-cheia-bomb"></canvas></div>
-        </div>
+        <div class="grafico-caixa cheia"><canvas id="g-cheia"></canvas></div>
       </div>
     </section>
 
     <section class="painel">
-      <h2>Cronograma de manobras</h2>
-      <p class="ajuda">O que executar na comporta, manobra a manobra. Entre uma linha e outra a abertura
-      fica parada.</p>
-      <div id="cronograma"></div>
+      <div class="cabecalho-painel">
+        <div><h2>Cronograma de manobras</h2>
+          <p class="ajuda" id="cronograma-resumo"></p>
+        </div>
+      </div>
+      <details class="serie-completa">
+        <summary>Ver as manobras uma a uma</summary>
+        <div id="cronograma"></div>
+      </details>
     </section>
 
     <section class="painel">
-      <h2>Se a abertura atrasar</h2>
-      <p class="ajuda">O cronograma acima executado tarde, como se a decisão demorasse. Mede a folga que
-      existe depois da hora marcada — e onde ela acaba.</p>
-      <div id="atraso"></div>
-    </section>
-
-    <section class="painel">
-      <h2>Se faltarem bombas</h2>
-      <p class="ajuda">A disponibilidade de ${esc(cfg.conjuntos[0]?.nome || 'bombeamento')} é a maior incerteza:
-      grade entupida pelo lixo da cheia, unidade em manutenção. Abaixo, o mesmo evento com cada disponibilidade.</p>
-      <div id="cenarios-bombas"></div>
-    </section>
-
-    <section class="painel">
-      <h2>Se o reservatório partir mais baixo</h2>
-      <p class="ajuda">Deplecionar antes cria volume de espera — mas abaixo do nível de captação a elevatória para
-      de bombear, e o remédio pode virar veneno.</p>
-      <div id="cenarios-nivel"></div>
+      <h2>E se…</h2>
+      <p class="ajuda">As três incertezas reais da operação, medidas sobre esta mesma cheia.</p>
+      <div class="cenarios">
+        <details class="cenario">
+          <summary>A abertura atrasar<span id="folga-resumo">quanta folga existe depois da hora marcada</span></summary>
+          <div id="atraso"></div>
+        </details>
+        <details class="cenario">
+          <summary>Faltarem bombas<span>grade entupida, unidade em manutenção</span></summary>
+          <div id="cenarios-bombas"></div>
+        </details>
+        <details class="cenario">
+          <summary>Partir de outra cota<span>deplecionar cria espera — mas pode parar a elevatória</span></summary>
+          <div id="cenarios-nivel"></div>
+        </details>
+      </div>
     </section>`;
 }
 
@@ -505,22 +483,26 @@ function item(rotulo, valor) {
 
 function desenhar(resultado, cfg) {
   const { serie, resumo } = resultado;
-  graficoNivel('g-cheia-nivel', serie,
-    { nivelMaxEmergencial: cfg.nivelMaximo, nivelMinEmergencial: cfg.nivelMinimo }, []);
-  graficoAfluenteVertimento('g-cheia-amort', serie, resumo.limiteSemDano);
-  graficoNivelVertimento('g-cheia-nivelvert', serie, {
+  graficoCheia('g-cheia', serie, {
     nivelMaximo: cfg.nivelMaximo, nivelMinimo: cfg.nivelMinimo, limiteSemDano: resumo.limiteSemDano,
   });
-  graficoVertimento('g-cheia-vert', serie, resumo.limiteSemDano);
-  graficoAfluenteSaida('g-cheia-afl', serie);
-  graficoBombeamento('g-cheia-bomb', serie);
 
   $('#cenarios-bombas').innerHTML = tabelaBombas(cenariosDeBombeamento(cfg, 0), cfg);
   $('#cenarios-nivel').innerHTML = tabelaNivel(cfg);
 
   const cronograma = cronogramaDeManobras(resultado);
-  $('#cronograma').innerHTML = tabelaCronograma(cronograma, resumo);
-  $('#atraso').innerHTML = tabelaAtraso(custoDoAtraso(cfg), resumo);
+  $('#cronograma').innerHTML = tabelaCronograma(cronograma);
+  $('#cronograma-resumo').innerHTML = cronograma.length
+    ? `<strong>${cronograma.length} manobras</strong> de ${num(resumo.degrau)} m³/s a cada
+       ${resumo.minutosPorDegrau} min. A primeira às <strong>${hora(cronograma[0].dataHora)}</strong>,
+       levando a comporta a ${num(cronograma[0].abertura)} m³/s.`
+    : 'A comporta permanece fechada durante todo o evento.';
+  const atraso = custoDoAtraso(cfg);
+  $('#atraso').innerHTML = tabelaAtraso(atraso, resumo);
+  const ultimaSemEstouro = [...atraso].reverse().find((l) => !l.estourouTeto);
+  $('#folga-resumo').textContent = ultimaSemEstouro && ultimaSemEstouro.atrasoMin
+    ? `cerca de ${ultimaSemEstouro.atrasoMin} min de folga depois da hora marcada`
+    : 'qualquer atraso faz o nível passar do teto';
 
   const nome = (cfg.reservatorio?.nome || 'cheia').replace(/\W+/g, '-').toLowerCase();
   $('#btn-exportar-cronograma').onclick = () => baixarCsv(`manobras-${nome}.csv`,
@@ -536,7 +518,7 @@ function desenhar(resultado, cfg) {
 }
 
 
-function tabelaCronograma(linhas, resumo) {
+function tabelaCronograma(linhas) {
   if (!linhas.length) return '<p class="vazio">Nenhuma manobra: a comporta permanece fechada.</p>';
   return `<div class="tabela-scroll"><table>
     <thead><tr><th>Quando</th><th>Ação</th><th class="num">Abertura alvo</th>
@@ -549,9 +531,7 @@ function tabelaCronograma(linhas, resumo) {
         <td class="num">${m.variacao > 0 ? '+' : '−'}${num(Math.abs(m.variacao))}</td>
         <td class="num">${num(m.cota)} m</td>
         <td class="num">${num(m.qaf)} m³/s</td>
-      </tr>`).join('')}</tbody></table></div>
-    <p class="ajuda" style="margin-top:12px">${linhas.length} manobras, de ${num(resumo.degrau)} m³/s
-    a cada ${resumo.minutosPorDegrau} min.</p>`;
+      </tr>`).join('')}</tbody></table></div>`;
 }
 
 function tabelaAtraso(linhas, resumo) {
