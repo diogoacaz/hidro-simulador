@@ -8,7 +8,7 @@
 
 import * as db from '../db.js';
 import { limitesCav, volumeDaCota } from '../cav.js';
-import { amortecerCheia, hidrogramaCheia, cenariosDeBombeamento, cronogramaDeManobras, custoDoAtraso } from '../cheia.js';
+import { amortecerCheia, propostaDePatamar, hidrogramaCheia, cenariosDeBombeamento, cronogramaDeManobras, custoDoAtraso } from '../cheia.js';
 import { graficoCheia } from '../charts.js';
 import { $, $$, esc, num, toast, comBotao, valorNumerico, paraInputDateTime } from '../ui.js';
 import { lerListaNumeros, baixarCsv } from '../planilha.js';
@@ -187,6 +187,11 @@ export async function render(container) {
               <input type="number" id="portaoInicio" step="0.01" placeholder="sem restrição" />
               <small>Abaixo dela a comporta fica fechada, mesmo que o cálculo peça abertura.</small>
             </label>
+            <label>Reserva abaixo do teto (m)
+              <input type="number" id="reserva" value="0.10" step="0.05" min="0" max="2" />
+              <small>Usada só pela proposta de menor pico: quanto do reservatório ela deixa
+              intacto para o caso de a cheia vir maior.</small>
+            </label>
             <label>Liberar acima do limite a partir da cota (m)
               <input type="number" id="portaoLibera" step="0.01" placeholder="sem restrição" />
               <small id="info-portao"></small>
@@ -290,13 +295,28 @@ export async function render(container) {
     e.preventDefault();
     await comBotao(e.submitter, async () => {
       const cfg = montarConfig(container, estado);
-      const resultado = amortecerCheia(cfg);
+      const reserva = Number($('#reserva', container).value) || 0;
+      // Duas propostas para a mesma cheia, com objetivos opostos. Quem decide
+      // qual executar é o operador, não o algoritmo.
+      estado.propostas = {
+        recurso: amortecerCheia(cfg),
+        patamar: propostaDePatamar(cfg, reserva),
+      };
+      estado.cfgAtual = cfg;
+      estado.escolha = 'recurso';
       const saida = $('#saida', container);
       saida.classList.remove('oculto');
-      saida.innerHTML = htmlSaida(resultado, cfg);
-      desenhar(resultado, cfg);
+      pintarEscolha(container, estado);
       saida.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 'Calculando…');
+  });
+
+  $('#saida', container).addEventListener('click', (e) => {
+    const botao = e.target.closest('[data-proposta]');
+    if (!botao || botao.dataset.proposta === estado.escolha) return;
+    estado.escolha = botao.dataset.proposta;
+    pintarEscolha(container, estado);
+    $('#saida', container).scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 }
 
@@ -392,6 +412,62 @@ function montarConfig(container, estado) {
     },
     dataInicial: new Date($('#dataInicial', container).value || Date.now()),
   };
+}
+
+// Redesenha a saída inteira para a proposta escolhida.
+function pintarEscolha(container, estado) {
+  const { propostas, escolha, cfgAtual } = estado;
+  const r = propostas[escolha] || propostas.recurso;
+  $('#saida', container).innerHTML = htmlPropostas(propostas, escolha) + htmlSaida(r, cfgAtual);
+  desenhar(r, cfgAtual);
+}
+
+const PROPOSTAS = {
+  recurso: {
+    nome: 'Vertimento de último recurso',
+    resumo: 'Segura a água enquanto couber e só abre o necessário. Verte o menor volume e pelo menor tempo — ao custo do maior pico.',
+  },
+  patamar: {
+    nome: 'Menor pico possível',
+    resumo: 'Abre cedo e mantém constante, usando o reservatório para achatar a onda. Verte mais volume e por mais tempo, com um pico bem menor.',
+  },
+};
+
+// As duas propostas lado a lado. A comparação vem antes do resultado porque
+// a escolha é do operador: as duas são válidas e servem a objetivos opostos.
+function htmlPropostas(propostas, escolha) {
+  const cartao = (chave) => {
+    const r = propostas[chave];
+    if (!r) return '';
+    const s = r.resumo;
+    const meta = PROPOSTAS[chave];
+    const ativo = chave === escolha;
+    return `
+      <button type="button" class="proposta${ativo ? ' ativa' : ''}" data-proposta="${chave}"
+        aria-pressed="${ativo}">
+        <span class="proposta-nome">${esc(meta.nome)}${
+  chave === 'patamar' && Number.isFinite(s.patamar) ? ` · patamar de ${num(s.patamar)} m³/s` : ''}</span>
+        <span class="proposta-pico">${num(s.picoVert)} <small>m³/s de pico</small></span>
+        <span class="proposta-linha">${s.horasAcimaDoLimite
+  ? `${num(s.horasAcimaDoLimite)} h acima de ${num(s.limiteSemDano)} m³/s`
+  : `nunca passa de ${num(s.limiteSemDano)} m³/s`}</span>
+        <span class="proposta-linha">cota máxima ${num(s.cotaMaxima)} m · ${s.manobras} manobras</span>
+        <span class="proposta-nota">${esc(meta.resumo)}</span>
+        ${chave === 'patamar' && s.reservaAlcancada === false
+    ? `<span class="proposta-alerta">A reserva de ${num(s.reserva)} m não cabe nesta cheia: nem a comporta
+       toda a mantém. Este é o menor pico que ainda segura o nível.</span>` : ''}
+      </button>`;
+  };
+  return `
+    <section class="painel">
+      <div class="cabecalho-painel">
+        <div><h2>Duas propostas para esta cheia</h2>
+          <p class="ajuda">Pico e duração se opõem: o volume a passar é quase o mesmo, então
+          baixar o pico significa verter por mais tempo. Escolha e o resto da tela acompanha.</p>
+        </div>
+      </div>
+      <div class="propostas">${cartao('recurso')}${cartao('patamar')}</div>
+    </section>`;
 }
 
 function htmlSaida({ resumo }, cfg) {

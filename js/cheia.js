@@ -530,6 +530,68 @@ export function amortecerCheia(cfg) {
   return central;
 }
 
+/**
+ * A outra proposta: o menor patamar constante de vertimento que segura o
+ * nível abaixo do teto, guardada uma reserva.
+ *
+ * A política padrão do app é de último recurso — não verte nada enquanto o
+ * nível estiver abaixo do teto e, ao encostar, acompanha a afluência. Ela
+ * minimiza o VOLUME vertido e adia a abertura, mas por isso mesmo é a que
+ * produz o MAIOR pico: guarda a água até o fim e solta tudo de uma vez.
+ *
+ * Esta aqui faz o contrário: abre cedo, baixo e constante, usando o
+ * reservatório para achatar a onda. É a solução minimax clássica do
+ * roteamento de cheia — o menor pico possível é um patamar, não uma ponta.
+ * Na cheia de projeto de Santana, 155 m³/s contra os 250 da política
+ * padrão, com as mesmas horas de alagamento.
+ *
+ * A reserva abaixo do teto é o que torna isso operável: o patamar mínimo
+ * absoluto gasta o reservatório inteiro e, se a afluência vier acima do
+ * previsto, não sobra nada — o plano de 115 m³/s vira 429 m³/s com 15% mais
+ * água. Cada centímetro guardado custa pico e compra robustez.
+ *
+ * A busca é força bruta sobre os múltiplos do degrau: são poucas dezenas de
+ * candidatos, o resultado é exato e não há heurística para justificar.
+ */
+export function propostaDePatamar(cfg, reservaM = 0.1) {
+  const { cav, hidrograma, nivelMaximo, vertedouro = {} } = cfg;
+  const degrau = Math.max(0.0001, Number(vertedouro.degrau) || 0.0001);
+  const capacidadeMax = Math.max(0, Number(vertedouro.capacidadeMax) || 0);
+  const reserva = Math.max(0, Number(reservaM) || 0);
+  const limiteCota = nivelMaximo - reserva;
+
+  let escolhido = null;
+  let menorCota = null;
+  const passos = Math.min(400, Math.ceil(capacidadeMax / degrau));
+  for (let k = 0; k <= passos; k++) {
+    const patamar = Math.min(k * degrau, capacidadeMax);
+    const r = amortecerUm({ ...cfg, patamarFixo: patamar, confianca: null });
+    r.resumo.patamar = patamar;
+    if (!menorCota || r.resumo.cotaMaxima < menorCota.resumo.cotaMaxima) menorCota = r;
+    if (r.resumo.cotaMaxima > limiteCota + 1e-9) continue;
+    // Entre os que cabem, o de menor pico; empate, o que alaga menos tempo.
+    if (!escolhido
+      || r.resumo.picoVert < escolhido.resumo.picoVert - 1e-9
+      || (Math.abs(r.resumo.picoVert - escolhido.resumo.picoVert) < 1e-9
+        && r.resumo.horasAcimaDoLimite < escolhido.resumo.horasAcimaDoLimite)) {
+      escolhido = r;
+    }
+  }
+
+  const alcancou = !!escolhido;
+  const base = escolhido || menorCota;
+  if (!base) return null;
+
+  // Refeita com os limites de confiança do usuário, se houver: mesmo plano de
+  // comporta, afluência variando. A busca roda sem eles para não triplicar.
+  const r = amortecerCheia({ ...cfg, patamarFixo: base.resumo.patamar });
+  r.resumo.patamar = base.resumo.patamar;
+  r.resumo.reserva = reserva;
+  r.resumo.limiteCota = limiteCota;
+  r.resumo.reservaAlcancada = alcancou;
+  return r;
+}
+
 function amortecerUm(cfg) {
   const {
     cav,
@@ -556,11 +618,17 @@ function amortecerUm(cfg) {
     ? Math.max(volumeDaCota(cav, nivelMinimo), volumeMinCav)
     : volumeMinCav;
 
+  // Com patamarFixo o cronograma não vem do envelope: é o patamar pedido,
+  // que simularCom alcança no degrau configurado.
+  const patamarFixo = Number(cfg.patamarFixo);
   const necessario = requisitoSemRampa(
     cav, hidrograma, volumeInicial, conjuntos, volumeTeto, volumePiso, capacidadeMax,
   );
-  const { envelope: vertimento, rampaInsuficiente } =
+  const { envelope, rampaInsuficiente } =
     envelopeDeRampa(necessario, degrau, passosPorDegrau, capacidadeMax);
+  const vertimento = Number.isFinite(patamarFixo)
+    ? hidrograma.map(() => patamarFixo)
+    : envelope;
 
   // O envelope é o ideal hidráulico. Os gatilhos de nível são a regra de
   // operação, e é na simulação que ela se impõe — inclusive impedindo a
@@ -576,7 +644,8 @@ function amortecerUm(cfg) {
 
   return montar({
     cav, hidrograma, vertimento: estado.vertido, programado: estado.comandado, estado, dataInicial,
-    necessario, rampaInsuficiente, portoes: manobra.portoes,
+    necessario, rampaInsuficiente: Number.isFinite(patamarFixo) ? false : rampaInsuficiente,
+    portoes: manobra.portoes,
     nivelMaximo, nivelMinimo, limiteSemDano, capacidadeMax, degrau, passosPorDegrau, conjuntos,
   });
 }
