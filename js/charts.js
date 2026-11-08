@@ -782,6 +782,20 @@ export function graficoCheia(canvasId, serie, limites = {}) {
   const vertido = serieLinha('Vertido (m³/s)', pontos.map((p) => p.qvert), c.qdef);
   vertido.yAxisID = 'yVazao';
 
+  // Quando o teto força o vertimento, o que passa deixa de ser o que foi
+  // comandado. Só aí a linha do comando entra: fora desse caso ela coincide
+  // com a outra e é só ruído.
+  const houveForcado = pontos.some((p) => p.qvertForcado > 1e-9);
+  const comandado = houveForcado
+    ? serieLinha('Comandado na comporta (m³/s)', pontos.map((p) => p.qvertProgramado), c.qdef,
+      { preencher: false })
+    : null;
+  if (comandado) {
+    comandado.yAxisID = 'yVazao';
+    comandado.borderDash = [5, 4];
+    comandado.borderWidth = 1.5;
+  }
+
   const bombeado = serieLinha('Bombeado (m³/s)', pontos.map((p) => p.qbomb), c.volume);
   bombeado.yAxisID = 'yBomba';
   const disponivel = serieLinha('Disponível na cota (m³/s)',
@@ -806,13 +820,14 @@ export function graficoCheia(canvasId, serie, limites = {}) {
         series: [
           { nome: 'Afluente', cor: c.qaf, indice: 1 },
           { nome: 'Vertido', cor: c.qdef, indice: 2 },
+          ...(comandado ? [{ nome: 'Comandado', cor: c.qdef, tracejado: [5, 4], indice: 3 }] : []),
         ] },
       { eixo: 'yBomba',
         titulo: 'Bombeamento',
         unidade: '(m³/s)',
         series: [
-          { nome: 'Bombeado', cor: c.volume, indice: 3 },
-          { nome: 'Disponível na cota', cor: c.volume, tracejado: [5, 4], indice: 4 },
+          { nome: 'Bombeado', cor: c.volume, indice: comandado ? 4 : 3 },
+          { nome: 'Disponível na cota', cor: c.volume, tracejado: [5, 4], indice: comandado ? 5 : 4 },
         ] },
     ],
   };
@@ -821,7 +836,7 @@ export function graficoCheia(canvasId, serie, limites = {}) {
     type: 'line',
     data: {
       labels: rotularPontos(pontos),
-      datasets: [nivel, afluente, vertido, bombeado, disponivel],
+      datasets: [nivel, afluente, vertido, ...(comandado ? [comandado] : []), bombeado, disponivel],
     },
     options: opcoes,
   });

@@ -172,21 +172,42 @@ function portaoVertimento(cota, portoes, limiteSemDano, capacidadeMax) {
   return capacidadeMax;
 }
 
-function repartirSaida(disponivelBomba, vertProgramado, volume, qaf, volumePiso) {
+// Reparte a saída de um passo entre bombeamento e vertimento, respeitando os
+// dois níveis de emergência.
+//
+// No PISO a retirada cede: não se tira mais do que a água que existe acima
+// dele. No TETO acontece o contrário e não é escolha de ninguém — com o
+// reservatório no máximo não há mais onde guardar, e a defluência iguala a
+// afluência no mesmo passo. A comporta deixa de ser o que limita: o que a
+// rampa não tiver aberto até ali passa assim mesmo, e esse excedente é
+// devolvido em `forcado` para que a tela não o confunda com manobra.
+function repartirSaida(disponivelBomba, vertProgramado, volume, qaf, volumePiso, volumeTeto, capacidadeMax) {
   const saidaMax = Math.max(0, (volume - volumePiso) / HM3_POR_M3S + qaf);
   const qb = Math.min(disponivelBomba, saidaMax);
-  const qv = Math.min(vertProgramado, Math.max(0, saidaMax - qb));
-  return { qb, qv, contido: qb < disponivelBomba - 1e-9 || qv < vertProgramado - 1e-9 };
+  let qv = Math.min(vertProgramado, Math.max(0, saidaMax - qb));
+  const contido = qb < disponivelBomba - 1e-9 || qv < vertProgramado - 1e-9;
+
+  let forcado = 0;
+  if (Number.isFinite(volumeTeto)) {
+    const saidaMin = (volume - volumeTeto) / HM3_POR_M3S + qaf;
+    const alvo = Math.min(Math.max(saidaMin - qb, 0), saidaMax, capacidadeMax);
+    if (alvo > qv + 1e-9) {
+      forcado = alvo - qv;
+      qv = alvo;
+    }
+  }
+  return { qb, qv, contido, forcado };
 }
 
 // Simula o reservatório com um cronograma de vertimento já definido.
-function simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volumePiso, manobra = null) {
+function simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volumePiso, volumeTeto, capacidadeMax, manobra = null) {
   const n = hidrograma.length;
   const volumes = new Array(n + 1);
   const bombeado = new Array(n);
   const vertido = new Array(n);
   const comandado = new Array(n);
   const reduzido = new Array(n);
+  const forcado = new Array(n).fill(0);
   const barrado = new Array(n).fill(false);
   volumes[0] = volumeInicial;
 
@@ -222,19 +243,20 @@ function simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volum
     }
     comandado[t] = alvoAtual;
 
-    const { qb, qv, contido } = repartirSaida(
-      bombeamentoNaCota(conjuntos, cota), alvoAtual, volumes[t], hidrograma[t], volumePiso,
+    const r = repartirSaida(
+      bombeamentoNaCota(conjuntos, cota), alvoAtual, volumes[t], hidrograma[t],
+      volumePiso, volumeTeto, capacidadeMax,
     );
-    bombeado[t] = qb;
-    vertido[t] = qv;
-    reduzido[t] = contido;
-    // Sem saturar no topo: é justamente a ultrapassagem que precisa ficar
-    // visível, porque é ela que determina quanto verter. Saturar aqui faria
-    // o excesso ser descartado em silêncio e o algoritmo concluiria que não
-    // havia o que verter.
-    volumes[t + 1] = volumes[t] + (hidrograma[t] - qb - qv) * HM3_POR_M3S;
+    bombeado[t] = r.qb;
+    vertido[t] = r.qv;
+    reduzido[t] = r.contido;
+    forcado[t] = r.forcado;
+    // O nível só passa do teto quando nem o vertedouro inteiro dá conta: aí
+    // a ultrapassagem é real e precisa aparecer, não ser saturada em
+    // silêncio.
+    volumes[t + 1] = volumes[t] + (hidrograma[t] - r.qb - r.qv) * HM3_POR_M3S;
   }
-  return { volumes, bombeado, vertido, comandado, reduzido, barrado };
+  return { volumes, bombeado, vertido, comandado, reduzido, barrado, forcado };
 }
 
 /**
@@ -272,7 +294,7 @@ function requisitoSemRampa(cav, hidrograma, volumeInicial, conjuntos, volumeTeto
     );
     const { qb, qv } = repartirSaida(
       bombeamentoNaCota(conjuntos, cota), Math.min(necessario, capacidadeMax),
-      volume, hidrograma[t], volumePiso,
+      volume, hidrograma[t], volumePiso, volumeTeto, capacidadeMax,
     );
     q[t] = qv;
     volume += (hidrograma[t] - qb - qv) * HM3_POR_M3S;
@@ -358,7 +380,7 @@ export function amortecerCheia(cfg) {
   const necessario = requisitoSemRampa(
     cav, hidrograma, volumeInicial, conjuntos, volumeTeto, volumePiso, capacidadeMax,
   );
-  const { envelope: vertimento, rampaInsuficiente, degraus } =
+  const { envelope: vertimento, rampaInsuficiente } =
     envelopeDeRampa(necessario, degrau, passosPorDegrau, capacidadeMax);
 
   // O envelope é o ideal hidráulico. Os gatilhos de nível são a regra de
@@ -368,28 +390,34 @@ export function amortecerCheia(cfg) {
     degrau, porBloco: passosPorDegrau, limiteSemDano, capacidadeMax,
     portoes: vertedouro.portoes || {},
   };
-  const estado = simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volumePiso, manobra);
+  const estado = simularCom(
+    cav, hidrograma, volumeInicial, conjuntos, vertimento, volumePiso, volumeTeto, capacidadeMax, manobra,
+  );
 
   return montar({
     cav, hidrograma, vertimento: estado.vertido, programado: estado.comandado, estado, dataInicial,
     necessario, rampaInsuficiente, portoes: manobra.portoes,
-    nivelMaximo, nivelMinimo, limiteSemDano, capacidadeMax, degrau, passosPorDegrau, degraus, conjuntos,
+    nivelMaximo, nivelMinimo, limiteSemDano, capacidadeMax, degrau, passosPorDegrau, conjuntos,
   });
 }
 
-// Quantas vezes a comporta precisa ser efetivamente manobrada.
-function contarManobras(degraus) {
-  if (!degraus || !degraus.length) return 0;
+// Quantas vezes a comporta é efetivamente manobrada. Conta sobre o que foi
+// COMANDADO na simulação, na grade da manobra — não sobre o envelope ideal,
+// que ignora os cortes do piso e dos gatilhos de nível e por isso divergia do
+// cronograma mostrado na tela.
+function contarManobras(programado, passosPorDegrau) {
+  if (!programado || !programado.length) return 0;
+  const passo = Math.max(1, passosPorDegrau);
   let n = 0;
   let anterior = 0;
-  for (const v of degraus) {
-    if (Math.abs(v - anterior) > 1e-9) n += 1;
-    anterior = v;
+  for (let t = 0; t < programado.length; t += passo) {
+    if (Math.abs(programado[t] - anterior) > 1e-9) n += 1;
+    anterior = programado[t];
   }
   return n;
 }
 
-function montar({ cav, hidrograma, vertimento, programado, estado, dataInicial, necessario, rampaInsuficiente, portoes, nivelMaximo, nivelMinimo, limiteSemDano, capacidadeMax, degrau, passosPorDegrau, degraus, conjuntos }) {
+function montar({ cav, hidrograma, vertimento, programado, estado, dataInicial, necessario, rampaInsuficiente, portoes, nivelMaximo, nivelMinimo, limiteSemDano, capacidadeMax, degrau, passosPorDegrau, conjuntos }) {
   const n = hidrograma.length;
   const serie = [];
   for (let t = 0; t <= n; t++) {
@@ -406,6 +434,9 @@ function montar({ cav, hidrograma, vertimento, programado, estado, dataInicial, 
       // quando o piso de emergência corta a retirada — é o programado que
       // vai para o cronograma, porque é o que o operador executa.
       qvertProgramado: programado[i],
+      // A parte do vertimento que o teto impôs, acima do que a comporta
+      // comandada entregava.
+      qvertForcado: estado.forcado[i],
       qsaida: estado.bombeado[i] + vertimento[i],
       retiradaReduzida: !!estado.reduzido[i],
       volume,
@@ -452,7 +483,20 @@ function montar({ cav, hidrograma, vertimento, programado, estado, dataInicial, 
   // feita em volume, que o simulador deixa passar de propósito.
   const volumeTeto = volumeDaCota(cav, nivelMaximo);
   const volumeMaximo = Math.max(...estado.volumes);
+  // Com a defluência igualando a afluência no teto, o nível só o ultrapassa
+  // se nem o vertedouro inteiro der conta. Quando isso acontece é falta de
+  // capacidade, não de manobra.
   const estouro = volumeMaximo > volumeTeto + 1e-9;
+
+  // Vertimento forçado pelo teto: o que passou sem ter sido comandado porque
+  // o reservatório encheu antes de a rampa chegar lá. É o salto a jusante
+  // que a antecipação da abertura existe para evitar.
+  const passosForcados = estado.forcado.filter((v) => v > 1e-9).length;
+  const picoForcado = Math.max(0, ...estado.forcado);
+  const primeiroForcado = estado.forcado.findIndex((v) => v > 1e-9);
+  const saltoNoTeto = primeiroForcado >= 0
+    ? vertimento[primeiroForcado] - (primeiroForcado > 0 ? vertimento[primeiroForcado - 1] : 0)
+    : 0;
   const naCapacidade = vertimento.some((v) => v >= capacidadeMax - 1e-9);
 
   return {
@@ -476,15 +520,22 @@ function montar({ cav, hidrograma, vertimento, programado, estado, dataInicial, 
       nivelMaximo,
       nivelMinimo,
       estourouTeto: estouro,
+      passosForcados,
+      picoForcado,
+      volumeForcado: estado.forcado.reduce((acc, q) => acc + q * HM3_POR_M3S, 0),
+      inicioForcado: primeiroForcado >= 0 ? serie[primeiroForcado].dataHora : null,
+      horasForcadas: (passosForcados * PASSO_SEGUNDOS) / 3600,
+      saltoNoTeto,
       volumeMaximo,
       volumeTeto,
       excedenteSobreTeto: Math.max(0, volumeMaximo - volumeTeto),
       naCapacidadeMaxima: naCapacidade,
+      capacidadeMax,
       degrau,
       passosPorDegrau,
       minutosPorDegrau: (passosPorDegrau * PASSO_SEGUNDOS) / 60,
       rampaPorPasso: degrau / passosPorDegrau,
-      manobras: contarManobras(degraus),
+      manobras: contarManobras(programado, passosPorDegrau),
       rampaInsuficiente,
       portoes,
       // Onde a regra de nível impediu uma abertura que o cálculo pedia.
@@ -554,16 +605,22 @@ export function custoDoAtraso(cfg, atrasosEmPassos = [2, 4, 8, 12]) {
   const avaliar = (atraso) => {
     const atrasado = new Array(n).fill(0);
     for (let t = 0; t < n; t++) atrasado[t] = t < atraso ? 0 : base.serie[t - atraso].qvert;
-    const e = simularCom(cfg.cav, cfg.hidrograma, volumeInicial, cfg.conjuntos || [], atrasado, volumePiso, {
-      degrau: Number(cfg.vertedouro?.degrau) || Infinity,
-      porBloco: Math.max(1, Math.round(Number(cfg.vertedouro?.passosPorDegrau) || 1)),
-      limiteSemDano: limite,
-      capacidadeMax: Number(cfg.vertedouro?.capacidadeMax) || 0,
-      portoes: cfg.vertedouro?.portoes || {},
-    });
+    const capacidadeMax = Number(cfg.vertedouro?.capacidadeMax) || 0;
+    const e = simularCom(
+      cfg.cav, cfg.hidrograma, volumeInicial, cfg.conjuntos || [], atrasado,
+      volumePiso, volumeTeto, capacidadeMax,
+      {
+        degrau: Number(cfg.vertedouro?.degrau) || Infinity,
+        porBloco: Math.max(1, Math.round(Number(cfg.vertedouro?.passosPorDegrau) || 1)),
+        limiteSemDano: limite,
+        capacidadeMax,
+        portoes: cfg.vertedouro?.portoes || {},
+      },
+    );
     const picoVert = Math.max(0, ...e.vertido);
     const acima = Number.isFinite(limite) ? e.vertido.filter((v) => v > limite + 1e-9).length : 0;
     const volumeMaximo = Math.max(...e.volumes);
+    const primeiroForcado = e.forcado.findIndex((v) => v > 1e-9);
     return {
       atrasoMin: (atraso * PASSO_SEGUNDOS) / 60,
       picoVert,
@@ -571,6 +628,11 @@ export function custoDoAtraso(cfg, atrasosEmPassos = [2, 4, 8, 12]) {
       cotaMaxima: cotaDoVolume(cfg.cav, volumeMaximo),
       excedenteSobreTeto: Math.max(0, volumeMaximo - volumeTeto),
       estourouTeto: volumeMaximo > volumeTeto + 1e-9,
+      dentroDoLimite: Number.isFinite(limite) ? picoVert <= limite + 1e-9 : null,
+      passosForcados: e.forcado.filter((v) => v > 1e-9).length,
+      saltoNoTeto: primeiroForcado >= 0
+        ? e.vertido[primeiroForcado] - (primeiroForcado > 0 ? e.vertido[primeiroForcado - 1] : 0)
+        : 0,
     };
   };
 
@@ -598,6 +660,8 @@ export function cenariosDeBombeamento(cfg, conjuntoVariavel = 0) {
       horasAcimaDoLimite: r.resumo.horasAcimaDoLimite,
       cotaMaxima: r.resumo.cotaMaxima,
       estourouTeto: r.resumo.estourouTeto,
+      passosForcados: r.resumo.passosForcados,
+      saltoNoTeto: r.resumo.saltoNoTeto,
     });
   }
   return saida;

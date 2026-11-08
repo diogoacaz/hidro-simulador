@@ -397,8 +397,16 @@ function htmlSaida({ resumo }, cfg) {
   !resumo.precisaVerter ? 'Sem vertimento' : resumo.dentroDoLimite ? 'Vertimento sem alagar' : 'Alaga ribeirinhos'}</span>
           ${resumo.precisaVerter ? `<span class="situacao-contagem">abrir a comporta a partir de ${hora(resumo.inicioAbertura)}</span>` : ''}
         </div>
-        ${resumo.estourouTeto ? `<p class="situacao-tipos"><strong>O nível ultrapassa o teto de ${num(resumo.nivelMaximo)} m</strong> em ${num(resumo.excedenteSobreTeto, 3)} hm³: os recursos informados não seguram esta cheia.</p>` : ''}
-        ${resumo.rampaInsuficiente ? '<p class="situacao-tipos"><strong>O degrau de manobra não acompanha.</strong> A comporta precisaria abrir mais rápido do que o informado para conter o nível.</p>' : ''}
+        ${resumo.passosForcados ? `<p class="situacao-tipos">
+          <strong>O nível encostou no teto de ${num(resumo.nivelMaximo)} m às ${hora(resumo.inicioForcado)}.</strong>
+          Dali em diante o reservatório não guarda mais nada e a defluência iguala a afluência: o vertimento
+          deixa de ser comandado e passa a acompanhar a cheia, por ${num(resumo.horasForcadas)} h — um salto de
+          <strong>${num(resumo.saltoNoTeto)} m³/s</strong> de um passo para o outro, contra os ${num(resumo.degrau)} m³/s
+          de uma manobra. Abrir antes, ou com degrau maior, troca esse salto por uma rampa.
+        </p>` : ''}
+        ${resumo.estourouTeto ? `<p class="situacao-tipos"><strong>Nem o vertedouro inteiro segura o nível no teto de ${num(resumo.nivelMaximo)} m:</strong>
+          com a capacidade de ${num(resumo.capacidadeMax)} m³/s já toda aberta, sobram ${num(resumo.excedenteSobreTeto, 3)} hm³ que o
+          reservatório não tem como passar adiante e acabam subindo acima do teto.</p>` : ''}
         ${resumo.seguraOPiso ? '' : `<p class="situacao-tipos"><strong>O nível fura o mínimo de ${num(resumo.nivelMinimo)} m</strong> mesmo com a retirada zerada: a afluência não repõe o que sai.</p>`}
         ${resumo.passosBarradosPeloPortao ? `<p class="situacao-tipos">
           <strong>Os gatilhos de nível seguraram a comporta em ${resumo.passosBarradosPeloPortao} passos</strong>
@@ -419,6 +427,10 @@ function htmlSaida({ resumo }, cfg) {
     item(`Acima de ${num(resumo.limiteSemDano)} m³/s`,
       resumo.horasAcimaDoLimite
         ? `${num(resumo.horasAcimaDoLimite)} h · ${num(resumo.volumeAcimaDoLimite, 2)} hm³`
+        : 'não ocorre'),
+    item('Forçado pelo teto',
+      resumo.passosForcados
+        ? `${num(resumo.horasForcadas)} h · pico ${num(resumo.picoForcado)} m³/s`
         : 'não ocorre'),
   ])}
         ${grupo('Nível', [
@@ -505,10 +517,14 @@ function desenhar(resultado, cfg) {
     : 'A comporta permanece fechada durante todo o evento.';
   const atraso = custoDoAtraso(cfg);
   $('#atraso').innerHTML = tabelaAtraso(atraso, resumo);
-  const ultimaSemEstouro = [...atraso].reverse().find((l) => !l.estourouTeto);
-  $('#folga-resumo').textContent = ultimaSemEstouro && ultimaSemEstouro.atrasoMin
-    ? `cerca de ${ultimaSemEstouro.atrasoMin} min de folga depois da hora marcada`
-    : 'qualquer atraso faz o nível passar do teto';
+  // Mesmo critério da tabela: a folga acaba quando o nível encosta no teto e
+  // a comporta deixa de ser quem manda no vertimento.
+  const ultimaSobComando = [...atraso].reverse().find((l) => !l.estourouTeto && !l.passosForcados);
+  $('#folga-resumo').textContent = ultimaSobComando && ultimaSobComando.atrasoMin
+    ? `cerca de ${ultimaSobComando.atrasoMin} min de folga depois da hora marcada`
+    : ultimaSobComando
+      ? 'qualquer atraso leva o nível ao teto'
+      : 'nem no horário a comporta mantém o controle';
 
   const nome = (cfg.reservatorio?.nome || 'cheia').replace(/\W+/g, '-').toLowerCase();
   $('#btn-exportar-cronograma').onclick = () => baixarCsv(`manobras-${nome}.csv`,
@@ -540,23 +556,40 @@ function tabelaCronograma(linhas) {
       </tr>`).join('')}</tbody></table></div>`;
 }
 
+// Com a defluência igualando a afluência no teto, "passar do teto" virou caso
+// de falta de vertedouro. O que o atraso, a falta de bomba ou uma partida mais
+// alta produzem é vertimento forçado — e é isso que estas tabelas medem.
+function situacao(l) {
+  if (l.estourouTeto) return 'vertedouro não dá conta';
+  if (l.passosForcados) return `forçado: salto de ${num(l.saltoNoTeto)} m³/s`;
+  if (l.dentroDoLimite === false) return 'alaga, mas sob comando';
+  return 'sob comando';
+}
+
+function classe(l) {
+  if (l.estourouTeto || l.passosForcados) return 'violacao-critico';
+  return l.dentroDoLimite === false ? 'violacao-atencao' : '';
+}
+
 function tabelaAtraso(linhas, resumo) {
-  const ultimaOk = [...linhas].reverse().find((l) => !l.estourouTeto);
+  // Folga = até quando a comporta ainda manda. Depois disso é o teto que
+  // manda, e o vertimento vira um degrau só.
+  const ultimaOk = [...linhas].reverse().find((l) => !l.estourouTeto && !l.passosForcados);
   const folga = ultimaOk ? ultimaOk.atrasoMin : 0;
   return `<div class="tabela-scroll"><table>
     <thead><tr><th>Atraso na abertura</th><th class="num">Pico vertido</th>
       <th class="num">Horas acima do limite</th><th class="num">Cota máx.</th><th>Situação</th></tr></thead>
     <tbody>${linhas.map((l) => `
-      <tr class="${l.estourouTeto ? 'violacao-critico' : ''}">
+      <tr class="${classe(l)}">
         <td><strong>${l.atrasoMin ? `${l.atrasoMin} min` : 'no horário'}</strong></td>
         <td class="num">${num(l.picoVert)} m³/s</td>
         <td class="num">${l.horasAcimaDoLimite ? num(l.horasAcimaDoLimite) : '—'}</td>
         <td class="num">${num(l.cotaMaxima)} m</td>
-        <td>${l.estourouTeto ? `passa do teto em ${num(l.excedenteSobreTeto, 2)} hm³` : 'ainda segura'}</td>
+        <td>${situacao(l)}</td>
       </tr>`).join('')}</tbody></table></div>
     <p class="ajuda" style="margin-top:12px">${folga
-    ? `Há cerca de <strong>${folga} min</strong> de folga depois da hora marcada (${hora(resumo.inicioAbertura)}) antes de o nível passar do teto.`
-    : 'Não há folga: qualquer atraso na abertura faz o nível passar do teto.'}</p>`;
+    ? `Há cerca de <strong>${folga} min</strong> de folga depois da hora marcada (${hora(resumo.inicioAbertura)}) antes de o nível encostar no teto e o vertimento deixar de ser comandado.`
+    : 'Não há folga: qualquer atraso leva o nível ao teto, e o vertimento passa a acompanhar a afluência.'}</p>`;
 }
 
 function tabelaBombas(cenarios, cfg) {
@@ -566,13 +599,13 @@ function tabelaBombas(cenarios, cfg) {
     <thead><tr><th>${esc(nome)}</th><th class="num">Retirada</th><th class="num">Pico vertido</th>
       <th class="num">Horas acima do limite</th><th class="num">Cota máx.</th><th>Situação</th></tr></thead>
     <tbody>${cenarios.map((c) => `
-      <tr class="${c.estourouTeto ? 'violacao-critico' : c.dentroDoLimite ? '' : 'violacao-atencao'}">
+      <tr class="${classe(c)}">
         <td><strong>${c.disponiveis}</strong> de ${cfg.conjuntos[0].unidades}</td>
         <td class="num">${num(c.bombeamento)} m³/s</td>
         <td class="num">${num(c.picoVert)} m³/s</td>
         <td class="num">${c.horasAcimaDoLimite ? num(c.horasAcimaDoLimite) : '—'}</td>
         <td class="num">${num(c.cotaMaxima)} m</td>
-        <td>${c.estourouTeto ? 'não segura' : c.dentroDoLimite ? 'sem alagar' : 'alaga'}</td>
+        <td>${situacao(c)}</td>
       </tr>`).join('')}</tbody></table></div>`;
 }
 
@@ -596,12 +629,12 @@ function tabelaNivel(cfg) {
     <thead><tr><th>Nível na partida</th><th class="num">Pico vertido</th><th class="num">Horas acima do limite</th>
       <th class="num">Cota máx.</th><th class="num">Bombeamento mín.</th><th>Situação</th></tr></thead>
     <tbody>${linhas.map((l) => `
-      <tr class="${l.estourouTeto ? 'violacao-critico' : l.dentroDoLimite ? '' : 'violacao-atencao'}">
+      <tr class="${classe(l)}">
         <td><strong>${num(l.nivelInicial)} m</strong></td>
         <td class="num">${num(l.picoVert)} m³/s</td>
         <td class="num">${l.horasAcimaDoLimite ? num(l.horasAcimaDoLimite) : '—'}</td>
         <td class="num">${num(l.cotaMaxima)} m</td>
         <td class="num">${num(l.bombeamentoMinimo)} m³/s</td>
-        <td>${l.estourouTeto ? 'não segura' : l.precisaVerter ? (l.dentroDoLimite ? 'sem alagar' : 'alaga') : 'sem verter'}</td>
+        <td>${l.precisaVerter ? situacao(l) : 'sem verter'}</td>
       </tr>`).join('')}</tbody></table></div>`;
 }
