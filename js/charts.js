@@ -235,7 +235,11 @@ const pluginLimites = {
 // marca, a legenda centralizada logo abaixo dele, e o traçado começando
 // embaixo de tudo isso — sem moldura, sem grade pesada, sem legenda geral
 // que obrigue a decorar cinco cores de uma vez.
-const ALTURA_CABECALHO = 34;
+// Altura reservada no alto de cada painel. O título não encosta na divisa:
+// entre ela e ele fica um vão, senão o título do painel de baixo se lê como
+// rótulo do eixo do painel de cima.
+const VAO_ANTES_DO_TITULO = 26;
+const ALTURA_CABECALHO = 58;
 
 const pluginPaineis = {
   id: 'paineis',
@@ -285,7 +289,7 @@ const pluginPaineis = {
         (serie) => serie.indice == null || !chart.getDatasetMeta(serie.indice).hidden,
       );
       const comLegenda = visiveis.length > 1;
-      const yTitulo = y.top + (comLegenda ? 13 : 15);
+      const yTitulo = y.top + VAO_ANTES_DO_TITULO + (comLegenda ? 0 : 7);
 
       // Unidade à esquerda, fora do caminho do título.
       ctx.textAlign = 'left';
@@ -794,11 +798,11 @@ export function graficoCheia(canvasId, serie, limites = {}) {
     x: opcoes.scales.x,
     // A folga é maior onde o painel é mais baixo: o cabeçalho tem altura
     // fixa, a faixa do painel não.
-    yBomba: eixo(2, { ocultarMaximo: true, marcas: 4, folgaNoAlto: 0.8 }),
-    yVazao: eixo(4, { ocultarMinimo: true, ocultarMaximo: true, marcas: 5, folgaNoAlto: 0.22 }),
+    yBomba: eixo(2.4, { ocultarMaximo: true, marcas: 4, folgaNoAlto: 0.62 }),
+    yVazao: eixo(4, { ocultarMinimo: true, ocultarMaximo: true, marcas: 7, folgaNoAlto: 0.24 }),
     // Mais marcas no nível: a faixa útil tem pouco mais de 2 m e, com poucas
     // marcas, o passo salta para 2 m e a escala sobe muito acima do teto.
-    yNivel: eixo(3, { ocultarMinimo: true, faixa: faixaNivel, marcas: 6, folgaNoAlto: 0.16 }),
+    yNivel: eixo(3, { ocultarMinimo: true, faixa: faixaNivel, marcas: 6, folgaNoAlto: 0.36 }),
   };
 
   const nivel = serieLinha('Nível (m)', pontos.map((p) => p.cota), c.nivel);
