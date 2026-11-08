@@ -38,10 +38,52 @@ export function bombeamentoNaCota(conjuntos, cota) {
 }
 
 /**
- * Hidrograma triangular: sobe de `base` até `pico` em `horasSubida` e volta
- * a `base` em `horasRecessao`. É a forma da cheia do Piraí — subida abrupta
- * e recessão de duração parecida.
+ * Hidrograma de projeto na forma que a cheia do Piraí realmente tem.
+ *
+ * A forma foi medida em 478 dias de afluência de 15 em 15 min a Santana
+ * (dez/2021 a abr/2023, 16 eventos acima de 80 m³/s). O que os dados
+ * mostram, e que o triangular simétrico errava:
+ *
+ *  - A subida não é reta. Começa devagar e explode no fim: no evento de
+ *    656 m³/s, dez horas antes do pico a vazão era 3 m³/s, oito horas antes
+ *    ainda 41, e quatro horas antes já 411. Uma curva em S (3u²−2u³)
+ *    reproduz isso quase exatamente — 10% e 65% do pico onde o dado traz
+ *    6% e 63%.
+ *  - A recessão é muito mais longa que a subida, e é exponencial, não
+ *    linear. Naquele mesmo evento: metade do pico em 7 h, um quarto em
+ *    12 h, um décimo em 20 h, base só em 58 h. O triangular devolvia tudo
+ *    em 8 h e subestimava o tempo que o reservatório passa sob pressão.
+ *
+ * Ajustando as duas formas aos dez maiores eventos, a subida em S com
+ * recessão exponencial erra 32% menos que o triangular na média, e 56%
+ * menos no maior deles.
+ *
+ * `horasMeiaRecessao` é a meia-vida: o tempo para cair à metade do pico.
+ * Mediana medida de 7 h. `horasDepois` é quanto da cauda se simula.
  */
+export function hidrogramaCheia({
+  base = 0, pico, horasSubida, horasMeiaRecessao, horasAntes = 0, horasDepois = 0,
+}) {
+  const porHora = 3600 / PASSO_SEGUNDOS;
+  const antes = Math.round(horasAntes * porHora);
+  const subida = Math.max(1, Math.round(horasSubida * porHora));
+  const depois = Math.max(1, Math.round(horasDepois * porHora));
+  const meiaVida = Math.max(1e-6, horasMeiaRecessao) * porHora;
+  const k = meiaVida / Math.LN2;
+
+  const serie = [];
+  for (let i = 0; i < antes; i++) serie.push(base);
+  for (let i = 1; i <= subida; i++) {
+    const u = i / subida;
+    serie.push(base + (pico - base) * (3 * u * u - 2 * u * u * u));
+  }
+  for (let i = 1; i <= depois; i++) {
+    serie.push(base + (pico - base) * Math.exp(-i / k));
+  }
+  return serie;
+}
+
+/** Forma antiga, simétrica. Mantida para comparação. */
 export function hidrogramaTriangular({ base = 0, pico, horasSubida, horasRecessao, horasAntes = 0, horasDepois = 0 }) {
   const porHora = 3600 / PASSO_SEGUNDOS;
   const antes = Math.round(horasAntes * porHora);
@@ -112,7 +154,16 @@ function simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volum
     if (manobra) {
       if (t % porBloco === 0) {
         const permitido = portaoVertimento(cota, manobra.portoes, manobra.limiteSemDano, manobra.capacidadeMax);
-        const alvo = Math.min(vertimento[t], permitido);
+        // Nem se comanda uma abertura que o reservatório não tem como
+        // sustentar: com o nível no piso e o bombeamento já levando tudo, não
+        // sobra água para verter. Sem este corte a antecipação mandava abrir
+        // a comporta antes da cheia, com o reservatório deplecionado.
+        const saidaMax = Math.max(0, (volumes[t] - volumePiso) / HM3_POR_M3S + hidrograma[t]);
+        const bruta = Math.max(0, saidaMax - Math.min(bombeamentoNaCota(conjuntos, cota), saidaMax));
+        // Arredondada para baixo no degrau: a folga é contínua e, entrando
+        // crua, tirava o comando da grade de manobra.
+        const folga = Number.isFinite(degrau) ? Math.floor(bruta / degrau + 1e-9) * degrau : bruta;
+        const alvo = Math.min(vertimento[t], permitido, folga);
         if (alvo > alvoAtual) alvoAtual = Math.min(alvo, alvoAtual + degrau);
         else if (alvo < alvoAtual) alvoAtual = Math.max(alvo, alvoAtual - degrau);
         barrado[t] = vertimento[t] > permitido + 1e-9;

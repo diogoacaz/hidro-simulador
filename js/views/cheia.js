@@ -8,7 +8,7 @@
 
 import * as db from '../db.js';
 import { limitesCav } from '../cav.js';
-import { amortecerCheia, hidrogramaTriangular, cenariosDeBombeamento, cronogramaDeManobras, custoDoAtraso } from '../cheia.js';
+import { amortecerCheia, hidrogramaCheia, cenariosDeBombeamento, cronogramaDeManobras, custoDoAtraso } from '../cheia.js';
 import { graficoNivel, graficoNivelVertimento, graficoAfluenteVertimento, graficoVertimento, graficoAfluenteSaida, graficoBombeamento } from '../charts.js';
 import { $, $$, esc, num, toast, comBotao, valorNumerico, paraInputDateTime } from '../ui.js';
 import { lerListaNumeros, baixarCsv } from '../planilha.js';
@@ -92,20 +92,26 @@ export async function render(container) {
           <legend>Cheia de projeto</legend>
           <div class="linha-inline" style="margin-bottom:12px">
             <label style="flex-direction:row;align-items:center;gap:6px;flex:0 0 auto">
-              <input type="radio" name="fonte" value="triangular" checked style="width:auto" /> Hidrograma triangular
+              <input type="radio" name="fonte" value="triangular" checked style="width:auto" /> Cheia de projeto
             </label>
             <label style="flex-direction:row;align-items:center;gap:6px;flex:0 0 auto">
               <input type="radio" name="fonte" value="serie" style="width:auto" /> Série medida
             </label>
           </div>
           <div class="grade grade-3" id="caixa-triangular">
-            <label>Vazão de base (m³/s)<input type="number" id="qBase" value="2" step="0.1" /></label>
-            <label>Pico (m³/s)<input type="number" id="qPico" value="600" step="1" /></label>
-            <label>Subida (h)<input type="number" id="hSubida" value="8" step="0.25" /></label>
-            <label>Recessão (h)<input type="number" id="hRecessao" value="8" step="0.25" /></label>
+            <label>Vazão de base (m³/s)<input type="number" id="qBase" value="3" step="0.1" /></label>
+            <label>Pico (m³/s)<input type="number" id="qPico" value="650" step="1" /></label>
+            <label>Subida até o pico (h)<input type="number" id="hSubida" value="9" step="0.25" /></label>
+            <label>Meia-vida da recessão (h)
+              <input type="number" id="hRecessao" value="7" step="0.25" />
+              <small>Tempo para a vazão cair à metade do pico.</small>
+            </label>
             <label>Antes do evento (h)<input type="number" id="hAntes" value="1" step="0.25" /></label>
-            <label>Depois (h)<input type="number" id="hDepois" value="4" step="0.25" /></label>
+            <label>Cauda simulada (h)<input type="number" id="hDepois" value="48" step="1" /></label>
           </div>
+          <p class="ajuda" style="margin-top:4px">A forma vem de 478 dias de afluência medida em Santana
+          (16 cheias acima de 80 m³/s): subida em S, que começa devagar e acelera no fim, e recessão
+          exponencial de cauda longa. Os valores acima são as medianas dos eventos grandes.</p>
           <label class="oculto" id="caixa-serie">Afluência de 15 em 15 min (m³/s)
             <textarea id="serieQaf" rows="4" placeholder="2,0&#10;5,5&#10;12,0"></textarea>
             <small id="info-serie"></small>
@@ -292,13 +298,13 @@ function montarConfig(container, estado) {
   const serieEscolhida = $('input[name="fonte"]:checked', container).value === 'serie';
   const hidrograma = serieEscolhida
     ? lerListaNumeros($('#serieQaf', container).value)
-    : hidrogramaTriangular({
+    : hidrogramaCheia({
       base: Number($('#qBase', container).value) || 0,
       pico: Number($('#qPico', container).value) || 0,
       horasSubida: Number($('#hSubida', container).value) || 1,
-      horasRecessao: Number($('#hRecessao', container).value) || 1,
+      horasMeiaRecessao: Number($('#hRecessao', container).value) || 1,
       horasAntes: Number($('#hAntes', container).value) || 0,
-      horasDepois: Number($('#hDepois', container).value) || 0,
+      horasDepois: Number($('#hDepois', container).value) || 1,
     });
   if (hidrograma.length < 2) throw new Error('Informe um hidrograma com pelo menos dois valores.');
 
