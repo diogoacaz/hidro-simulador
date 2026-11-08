@@ -230,9 +230,13 @@ const pluginLimites = {
   },
 };
 
-// Painéis empilhados: um filete entre eles e uma legenda própria dentro de
-// cada um. Sem isto as três faixas se leem como um gráfico só e as escalas se
-// confundem — e a legenda global obrigaria a decorar cinco cores de uma vez.
+// Painéis empilhados, no arranjo que a HYDROGRID usa e que funciona bem:
+// a unidade discreta no canto esquerdo, o título centralizado na cor da
+// marca, a legenda centralizada logo abaixo dele, e o traçado começando
+// embaixo de tudo isso — sem moldura, sem grade pesada, sem legenda geral
+// que obrigue a decorar cinco cores de uma vez.
+const ALTURA_CABECALHO = 34;
+
 const pluginPaineis = {
   id: 'paineis',
   beforeDatasetsDraw(chart, _args, opts) {
@@ -258,11 +262,16 @@ const pluginPaineis = {
     const { ctx, chartArea, scales } = chart;
     if (!chartArea) return;
 
+    const meio = (chartArea.left + chartArea.right) / 2;
     ctx.save();
     ctx.textBaseline = 'middle';
+
     for (const painel of lista) {
       const y = scales[painel.eixo];
       if (!y) continue;
+
+      // Um fio entre painéis, para a divisa não depender de perceber que a
+      // escala mudou.
       if (y.top > chartArea.top + 1) {
         ctx.beginPath();
         ctx.strokeStyle = opts.divisor;
@@ -271,37 +280,51 @@ const pluginPaineis = {
         ctx.lineTo(chartArea.right, Math.round(y.top) + 0.5);
         ctx.stroke();
       }
-      let x = chartArea.left + 10;
-      const cy = y.top + 13;
 
-      ctx.font = `700 11px ${FONTE.family}`;
-      ctx.fillStyle = opts.tinta;
-      ctx.fillText(painel.titulo, x, cy);
-      x += ctx.measureText(painel.titulo).width + 6;
+      const visiveis = painel.series.filter(
+        (serie) => serie.indice == null || !chart.getDatasetMeta(serie.indice).hidden,
+      );
+      const comLegenda = visiveis.length > 1;
+      const yTitulo = y.top + (comLegenda ? 13 : 15);
 
+      // Unidade à esquerda, fora do caminho do título.
+      ctx.textAlign = 'left';
       ctx.font = `500 10px ${FONTE.family}`;
       ctx.fillStyle = opts.suave;
-      ctx.fillText(painel.unidade, x, cy);
-      x += ctx.measureText(painel.unidade).width + 16;
+      ctx.fillText(painel.unidade, chartArea.left, yTitulo);
 
-      if (painel.series.length < 2) continue;
-      for (const serie of painel.series) {
-        const oculta = serie.indice != null && chart.getDatasetMeta(serie.indice).hidden;
-        if (oculta) continue;
+      ctx.textAlign = 'center';
+      ctx.font = `600 12px ${FONTE.family}`;
+      ctx.fillStyle = opts.titulo;
+      ctx.fillText(painel.nome, meio, yTitulo);
+
+      if (!comLegenda) continue;
+
+      // A legenda é medida antes de ser desenhada, para ficar centrada como
+      // um bloco só em vez de escorrer para a direita.
+      ctx.font = `500 10px ${FONTE.family}`;
+      const ESPACO = 18;
+      const itens = visiveis.map((serie) => ({
+        serie,
+        largura: 14 + 5 + ctx.measureText(serie.nome).width,
+      }));
+      const total = itens.reduce((acc, i) => acc + i.largura, 0) + ESPACO * (itens.length - 1);
+      let x = meio - total / 2;
+      const yLegenda = yTitulo + 16;
+
+      ctx.textAlign = 'left';
+      for (const { serie, largura } of itens) {
         ctx.strokeStyle = serie.cor;
         ctx.lineWidth = 2;
         ctx.setLineDash(serie.tracejado || []);
         ctx.beginPath();
-        ctx.moveTo(x, cy);
-        ctx.lineTo(x + 14, cy);
+        ctx.moveTo(x, yLegenda);
+        ctx.lineTo(x + 14, yLegenda);
         ctx.stroke();
         ctx.setLineDash([]);
-        x += 19;
-
-        ctx.font = `500 10px ${FONTE.family}`;
         ctx.fillStyle = opts.medio;
-        ctx.fillText(serie.nome, x, cy);
-        x += ctx.measureText(serie.nome).width + 14;
+        ctx.fillText(serie.nome, x + 19, yLegenda);
+        x += largura + ESPACO;
       }
     }
     ctx.restore();
@@ -728,13 +751,6 @@ export function graficoCheia(canvasId, serie, limites = {}) {
   if (Number.isFinite(nivelMinimo)) linhas.push({ rotulo: 'piso', valor: nivelMinimo, cor: c.emergencial, eixo: 'yNivel' });
   if (Number.isFinite(limiteSemDano)) linhas.push({ rotulo: 'alaga', valor: limiteSemDano, cor: c.emergencial, eixo: 'yVazao' });
   opcoes.plugins.limites = { lista: linhas, superficie: c.superficie };
-  if (Number.isFinite(nivelMaximo) && Number.isFinite(nivelMinimo)) {
-    opcoes.plugins.faixas = {
-      lista: [{ de: nivelMinimo, ate: nivelMaximo, eixo: 'yNivel',
-        cor: rgba(c.nivel, escuro ? 0.05 : 0.07) }],
-    };
-  }
-
   // A ordem das chaves é a de baixo para cima: o nível, que é a restrição,
   // fica no topo; o bombeamento, que é o recurso, na base.
   const eixo = (peso, extras = {}) => ({
@@ -742,7 +758,14 @@ export function graficoCheia(canvasId, serie, limites = {}) {
     stack: 'cheia',
     stackWeight: peso,
     border: { display: false },
-    grid: { color: c.grade, drawTicks: false, lineWidth: 1 },
+    grid: { color: rgba(c.suave, escuro ? 0.16 : 0.13), drawTicks: false, lineWidth: 1 },
+    // Espaço no alto de cada painel para o título e a legenda. `grace` não
+    // serve: ele afrouxa os dois extremos, e um eixo de vazão não desce
+    // abaixo de zero. Aqui só o teto da escala sobe.
+    afterDataLimits(escala) {
+      const vao = escala.max - escala.min;
+      if (vao > 0) escala.max += vao * (extras.folgaNoAlto || 0);
+    },
     ticks: {
       color: c.suave, font: { ...FONTE, size: 10 }, padding: 10, maxTicksLimit: extras.marcas || 4,
       maxRotation: 0,
@@ -769,9 +792,13 @@ export function graficoCheia(canvasId, serie, limites = {}) {
 
   opcoes.scales = {
     x: opcoes.scales.x,
-    yBomba: eixo(2, { ocultarMaximo: true, marcas: 3 }),
-    yVazao: eixo(4, { ocultarMinimo: true, ocultarMaximo: true, marcas: 5 }),
-    yNivel: eixo(3, { ocultarMinimo: true, faixa: faixaNivel }),
+    // A folga é maior onde o painel é mais baixo: o cabeçalho tem altura
+    // fixa, a faixa do painel não.
+    yBomba: eixo(2, { ocultarMaximo: true, marcas: 4, folgaNoAlto: 0.8 }),
+    yVazao: eixo(4, { ocultarMinimo: true, ocultarMaximo: true, marcas: 5, folgaNoAlto: 0.22 }),
+    // Mais marcas no nível: a faixa útil tem pouco mais de 2 m e, com poucas
+    // marcas, o passo salta para 2 m e a escala sobe muito acima do teto.
+    yNivel: eixo(3, { ocultarMinimo: true, faixa: faixaNivel, marcas: 6, folgaNoAlto: 0.16 }),
   };
 
   const nivel = serieLinha('Nível (m)', pontos.map((p) => p.cota), c.nivel);
@@ -791,25 +818,25 @@ export function graficoCheia(canvasId, serie, limites = {}) {
   disponivel.borderWidth = 1.5;
 
   opcoes.plugins.paineis = {
-    divisor: escuro ? rgba(c.suave, 0.45) : rgba(c.suave, 0.3),
-    tinta: c.texto,
+    divisor: rgba(c.suave, escuro ? 0.3 : 0.22),
+    titulo: varCss('--acento-tinta', escuro ? '#c3ff24' : '#1f6b57'),
     medio: c.medio,
     suave: c.suave,
     lista: [
       { eixo: 'yNivel',
-        titulo: 'Nível do reservatório',
-        unidade: '(m)',
+        nome: 'Nível do reservatório',
+        unidade: 'm',
         series: [{ nome: 'Nível', cor: c.nivel, indice: 0 }] },
       { eixo: 'yVazao',
-        titulo: 'Afluência e vertimento',
-        unidade: '(m³/s)',
+        nome: 'Afluência e vertimento',
+        unidade: 'm³/s',
         series: [
           { nome: 'Afluente', cor: c.qaf, indice: 1 },
           { nome: 'Vertido', cor: c.qdef, indice: 2 },
         ] },
       { eixo: 'yBomba',
-        titulo: 'Bombeamento',
-        unidade: '(m³/s)',
+        nome: 'Bombeamento',
+        unidade: 'm³/s',
         series: [
           { nome: 'Bombeado', cor: c.volume, indice: 3 },
           { nome: 'Disponível na cota', cor: c.volume, tracejado: [5, 4], indice: 4 },
