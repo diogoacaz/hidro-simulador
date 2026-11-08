@@ -40,46 +40,57 @@ export function bombeamentoNaCota(conjuntos, cota) {
 /**
  * Hidrograma de projeto na forma que a cheia do Piraí realmente tem.
  *
- * A forma foi medida em 478 dias de afluência de 15 em 15 min a Santana
- * (dez/2021 a abr/2023, 16 eventos acima de 80 m³/s). O que os dados
- * mostram, e que o triangular simétrico errava:
+ * A forma saiu de 478 dias de afluência de 15 em 15 min a Santana
+ * (dez/2021 a abr/2023, 16 eventos acima de 80 m³/s), ajustando candidatas
+ * aos dez maiores por mínimos quadrados.
  *
- *  - A subida não é reta. Começa devagar e explode no fim: no evento de
- *    656 m³/s, dez horas antes do pico a vazão era 3 m³/s, oito horas antes
- *    ainda 41, e quatro horas antes já 411. Uma curva em S (3u²−2u³)
- *    reproduz isso quase exatamente — 10% e 65% do pico onde o dado traz
- *    6% e 63%.
- *  - A recessão é muito mais longa que a subida, e é exponencial, não
- *    linear. Naquele mesmo evento: metade do pico em 7 h, um quarto em
- *    12 h, um décimo em 20 h, base só em 58 h. O triangular devolvia tudo
- *    em 8 h e subestimava o tempo que o reservatório passa sob pressão.
+ * SUBIDA — linear. Chegamos a usar uma curva em S, por leitura apressada de
+ * um evento só; medindo os dez maiores com o mesmo critério de início, a
+ * forma varia muito (três quase retas, quatro côncavas, duas convexas) e a
+ * reta é a que menos erra na média ponderada pelo pico. O parâmetro que
+ * importa é a DURAÇÃO da subida, não a curvatura.
  *
- * Ajustando as duas formas aos dez maiores eventos, a subida em S com
- * recessão exponencial erra 32% menos que o triangular na média, e 56%
- * menos no maior deles.
+ * RECESSÃO — exponencial de expoente ajustável:
  *
- * `horasMeiaRecessao` é a meia-vida: o tempo para cair à metade do pico.
- * Mediana medida de 7 h. `horasDepois` é quanto da cauda se simula.
+ *     q(t) = base + (pico − base) · exp(−(t/k)^p)
+ *
+ * A exponencial pura (p = 1) erra de dois jeitos ao mesmo tempo: desce cedo
+ * demais logo após o pico, onde a vazão real ainda se sustenta por uma ou
+ * duas horas, e sustenta cauda demais entre 8 e 32 h, onde a real já caiu.
+ * Com p > 1 a crista fica achatada e a queda, mais íngreme — 71% menos erro
+ * contra a forma média medida.
+ *
+ * O expoente não é um número mágico: sai dos dois tempos que se leem num
+ * hidrograma real, a meia-vida e o tempo até 10% do pico. A razão entre eles
+ * determina p — numa exponencial pura seria sempre ln10/ln2 = 3,32, e nos
+ * eventos de Santana a mediana é 2,52, daí p ≈ 1,3. Eventos de cauda gorda
+ * (razão 5,1) e de corte abrupto (1,25) também aparecem, e ficam
+ * representáveis pelos mesmos dois campos.
+ *
+ * Medianas medidas, que são os padrões da tela: subida 9 h, t½ 7 h,
+ * t10% 17 h.
  */
 export function hidrogramaCheia({
-  base = 0, pico, horasSubida, horasMeiaRecessao, horasAntes = 0, horasDepois = 0,
+  base = 0, pico, horasSubida, horasMeiaRecessao, horasDecimoRecessao,
+  horasAntes = 0, horasDepois = 0,
 }) {
   const porHora = 3600 / PASSO_SEGUNDOS;
   const antes = Math.round(horasAntes * porHora);
   const subida = Math.max(1, Math.round(horasSubida * porHora));
   const depois = Math.max(1, Math.round(horasDepois * porHora));
-  const meiaVida = Math.max(1e-6, horasMeiaRecessao) * porHora;
-  const k = meiaVida / Math.LN2;
+
+  const t50 = Math.max(1e-6, Number(horasMeiaRecessao) || 1);
+  const t10 = Number(horasDecimoRecessao);
+  // Sem o segundo tempo, ou com um valor incoerente, cai na exponencial pura.
+  const expoente = Number.isFinite(t10) && t10 > t50 * 1.02
+    ? Math.log(Math.log(10) / Math.log(2)) / Math.log(t10 / t50)
+    : 1;
+  const k = (t50 * porHora) / Math.log(2) ** (1 / expoente);
 
   const serie = [];
   for (let i = 0; i < antes; i++) serie.push(base);
-  for (let i = 1; i <= subida; i++) {
-    const u = i / subida;
-    serie.push(base + (pico - base) * (3 * u * u - 2 * u * u * u));
-  }
-  for (let i = 1; i <= depois; i++) {
-    serie.push(base + (pico - base) * Math.exp(-i / k));
-  }
+  for (let i = 1; i <= subida; i++) serie.push(base + (pico - base) * (i / subida));
+  for (let i = 1; i <= depois; i++) serie.push(base + (pico - base) * Math.exp(-((i / k) ** expoente)));
   return serie;
 }
 

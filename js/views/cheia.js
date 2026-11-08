@@ -102,16 +102,21 @@ export async function render(container) {
             <label>Vazão de base (m³/s)<input type="number" id="qBase" value="3" step="0.1" /></label>
             <label>Pico (m³/s)<input type="number" id="qPico" value="650" step="1" /></label>
             <label>Subida até o pico (h)<input type="number" id="hSubida" value="9" step="0.25" /></label>
-            <label>Meia-vida da recessão (h)
+            <label>Recessão: tempo até a metade (h)
               <input type="number" id="hRecessao" value="7" step="0.25" />
-              <small>Tempo para a vazão cair à metade do pico.</small>
+              <small>Da vazão de pico até metade dela.</small>
+            </label>
+            <label>Recessão: tempo até 10% (h)
+              <input type="number" id="hDecimo" value="17" step="0.5" />
+              <small id="info-cauda"></small>
             </label>
             <label>Antes do evento (h)<input type="number" id="hAntes" value="1" step="0.25" /></label>
             <label>Cauda simulada (h)<input type="number" id="hDepois" value="48" step="1" /></label>
           </div>
           <p class="ajuda" style="margin-top:4px">A forma vem de 478 dias de afluência medida em Santana
-          (16 cheias acima de 80 m³/s): subida em S, que começa devagar e acelera no fim, e recessão
-          exponencial de cauda longa. Os valores acima são as medianas dos eventos grandes.</p>
+          (16 cheias acima de 80 m³/s), ajustada aos dez maiores. Os dois tempos de recessão definem o
+          formato da cauda: quanto mais próximos, mais abrupto o corte. Os valores acima são as
+          medianas medidas.</p>
           <label class="oculto" id="caixa-serie">Afluência de 15 em 15 min (m³/s)
             <textarea id="serieQaf" rows="4" placeholder="2,0&#10;5,5&#10;12,0"></textarea>
             <small id="info-serie"></small>
@@ -206,6 +211,18 @@ export async function render(container) {
     $('#info-rampa', container).textContent =
       `${num(d)} m³/s a cada ${p * 15} min · equivale a ${num(d / p)} m³/s por passo`;
   };
+  const atualizarCauda = () => {
+    const t50 = Number($('#hRecessao', container).value) || 0;
+    const t10 = Number($('#hDecimo', container).value) || 0;
+    const info = $('#info-cauda', container);
+    if (!(t10 > t50 * 1.02)) { info.textContent = 'Precisa ser maior que o tempo até a metade.'; return; }
+    const razao = t10 / t50;
+    info.textContent = `Razão ${num(razao)} — ${razao > 3.0 ? 'cauda longa' : razao > 2.0 ? 'cauda típica de Santana' : 'corte abrupto'}.`;
+  };
+  $('#hRecessao', container).addEventListener('input', atualizarCauda);
+  $('#hDecimo', container).addEventListener('input', atualizarCauda);
+  atualizarCauda();
+
   const atualizarPortao = () => {
     const lim = Number($('#vertSemDano', container).value);
     $('#info-portao', container).textContent = Number.isFinite(lim)
@@ -303,6 +320,7 @@ function montarConfig(container, estado) {
       pico: Number($('#qPico', container).value) || 0,
       horasSubida: Number($('#hSubida', container).value) || 1,
       horasMeiaRecessao: Number($('#hRecessao', container).value) || 1,
+      horasDecimoRecessao: Number($('#hDecimo', container).value) || null,
       horasAntes: Number($('#hAntes', container).value) || 0,
       horasDepois: Number($('#hDepois', container).value) || 1,
     });
