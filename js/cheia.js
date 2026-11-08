@@ -241,8 +241,6 @@ function simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volum
     } else {
       alvoAtual = vertimento[t];
     }
-    comandado[t] = alvoAtual;
-
     const r = repartirSaida(
       bombeamentoNaCota(conjuntos, cota), alvoAtual, volumes[t], hidrograma[t],
       volumePiso, volumeTeto, capacidadeMax,
@@ -251,6 +249,12 @@ function simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volum
     vertido[t] = r.qv;
     reduzido[t] = r.contido;
     forcado[t] = r.forcado;
+    // Com o nível no teto o operador não tem escolha: ele comanda na comporta
+    // o que for preciso para igualar a afluência, fora da grade e fora do
+    // degrau. O comando acompanha — se ficasse para trás, o cronograma
+    // mandaria abrir 5 m³/s enquanto a barragem precisa de 350.
+    if (r.forcado > 1e-9) alvoAtual = r.qv;
+    comandado[t] = alvoAtual;
     // O nível só passa do teto quando nem o vertedouro inteiro dá conta: aí
     // a ultrapassagem é real e precisa aparecer, não ser saturada em
     // silêncio.
@@ -401,20 +405,30 @@ export function amortecerCheia(cfg) {
   });
 }
 
-// Quantas vezes a comporta é efetivamente manobrada. Conta sobre o que foi
-// COMANDADO na simulação, na grade da manobra — não sobre o envelope ideal,
-// que ignora os cortes do piso e dos gatilhos de nível e por isso divergia do
-// cronograma mostrado na tela.
-function contarManobras(programado, passosPorDegrau) {
-  if (!programado || !programado.length) return 0;
+/**
+ * Os instantes em que a comporta se move, que são o cronograma do operador.
+ *
+ * Normalmente a comporta só se mexe na grade da manobra — de `passo` em
+ * `passo` passos de 15 min. Mas com o nível no teto a regra do degrau cai:
+ * ali a abertura tem de acompanhar a afluência a cada passo, e cada ajuste é
+ * uma manobra que alguém executa. Por isso a varredura é passo a passo e a
+ * grade só filtra o que NÃO é forçado.
+ *
+ * Uma função só, usada pela contagem e pela tabela, para as duas nunca mais
+ * divergirem.
+ */
+function instantesDeManobra(programado, forcado, passosPorDegrau) {
   const passo = Math.max(1, passosPorDegrau);
-  let n = 0;
+  const fora = [];
   let anterior = 0;
-  for (let t = 0; t < programado.length; t += passo) {
-    if (Math.abs(programado[t] - anterior) > 1e-9) n += 1;
+  for (let t = 0; t < programado.length; t++) {
+    const imposta = forcado ? forcado[t] > 1e-9 : false;
+    if (!imposta && t % passo !== 0) continue;
+    if (Math.abs(programado[t] - anterior) <= 1e-9) { anterior = programado[t]; continue; }
+    fora.push({ t, abertura: programado[t], variacao: programado[t] - anterior, imposta });
     anterior = programado[t];
   }
-  return n;
+  return fora;
 }
 
 function montar({ cav, hidrograma, vertimento, programado, estado, dataInicial, necessario, rampaInsuficiente, portoes, nivelMaximo, nivelMinimo, limiteSemDano, capacidadeMax, degrau, passosPorDegrau, conjuntos }) {
@@ -492,7 +506,6 @@ function montar({ cav, hidrograma, vertimento, programado, estado, dataInicial, 
   // o reservatório encheu antes de a rampa chegar lá. É o salto a jusante
   // que a antecipação da abertura existe para evitar.
   const passosForcados = estado.forcado.filter((v) => v > 1e-9).length;
-  const picoForcado = Math.max(0, ...estado.forcado);
   const primeiroForcado = estado.forcado.findIndex((v) => v > 1e-9);
   const saltoNoTeto = primeiroForcado >= 0
     ? vertimento[primeiroForcado] - (primeiroForcado > 0 ? vertimento[primeiroForcado - 1] : 0)
@@ -521,10 +534,9 @@ function montar({ cav, hidrograma, vertimento, programado, estado, dataInicial, 
       nivelMinimo,
       estourouTeto: estouro,
       passosForcados,
-      picoForcado,
-      volumeForcado: estado.forcado.reduce((acc, q) => acc + q * HM3_POR_M3S, 0),
       inicioForcado: primeiroForcado >= 0 ? serie[primeiroForcado].dataHora : null,
-      horasForcadas: (passosForcados * PASSO_SEGUNDOS) / 3600,
+      // A abertura que o teto impõe de uma vez — a manobra que o operador
+      // executa fora do degrau.
       saltoNoTeto,
       volumeMaximo,
       volumeTeto,
@@ -535,7 +547,7 @@ function montar({ cav, hidrograma, vertimento, programado, estado, dataInicial, 
       passosPorDegrau,
       minutosPorDegrau: (passosPorDegrau * PASSO_SEGUNDOS) / 60,
       rampaPorPasso: degrau / passosPorDegrau,
-      manobras: contarManobras(programado, passosPorDegrau),
+      manobras: instantesDeManobra(programado, estado.forcado, passosPorDegrau).length,
       rampaInsuficiente,
       portoes,
       // Onde a regra de nível impediu uma abertura que o cálculo pedia.
@@ -564,23 +576,22 @@ function montar({ cav, hidrograma, vertimento, programado, estado, dataInicial, 
  * comporta só se move nos degraus — o que se executa são estas linhas.
  */
 export function cronogramaDeManobras({ serie, resumo }) {
-  const passo = Math.max(1, resumo.passosPorDegrau);
-  const linhas = [];
-  let anterior = 0;
-  for (let t = 0; t < serie.length - 1; t += passo) {
-    const alvo = serie[t].qvertProgramado;
-    if (Math.abs(alvo - anterior) <= 1e-9) { anterior = alvo; continue; }
-    linhas.push({
-      dataHora: serie[t].dataHora,
-      abertura: alvo,
-      variacao: alvo - anterior,
-      cota: serie[t].cota,
-      qaf: serie[t].qaf,
-      acimaDoLimite: Number.isFinite(resumo.limiteSemDano) && alvo > resumo.limiteSemDano + 1e-9,
-    });
-    anterior = alvo;
-  }
-  return linhas;
+  const passos = serie.slice(0, -1);
+  return instantesDeManobra(
+    passos.map((s) => s.qvertProgramado),
+    passos.map((s) => s.qvertForcado),
+    resumo.passosPorDegrau,
+  ).map(({ t, abertura, variacao, imposta }) => ({
+    dataHora: serie[t].dataHora,
+    abertura,
+    variacao,
+    // Manobra que o teto impôs: fora da grade e, quase sempre, maior que um
+    // degrau. Não é opção do operador.
+    imposta,
+    cota: serie[t].cota,
+    qaf: serie[t].qaf,
+    acimaDoLimite: Number.isFinite(resumo.limiteSemDano) && abertura > resumo.limiteSemDano + 1e-9,
+  }));
 }
 
 /**

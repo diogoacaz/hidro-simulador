@@ -399,10 +399,10 @@ function htmlSaida({ resumo }, cfg) {
         </div>
         ${resumo.passosForcados ? `<p class="situacao-tipos">
           <strong>O nível encostou no teto de ${num(resumo.nivelMaximo)} m às ${hora(resumo.inicioForcado)}.</strong>
-          Dali em diante o reservatório não guarda mais nada e a defluência iguala a afluência: o vertimento
-          deixa de ser comandado e passa a acompanhar a cheia, por ${num(resumo.horasForcadas)} h — um salto de
-          <strong>${num(resumo.saltoNoTeto)} m³/s</strong> de um passo para o outro, contra os ${num(resumo.degrau)} m³/s
-          de uma manobra. Abrir antes, ou com degrau maior, troca esse salto por uma rampa.
+          Ali o reservatório não guarda mais nada e a defluência tem de igualar a afluência: a comporta é
+          aberta de <strong>${num(resumo.saltoNoTeto)} m³/s de uma vez</strong>, contra os ${num(resumo.degrau)} m³/s
+          de uma manobra normal. A regra do degrau não se aplica nesse ponto — não há escolha. A manobra está
+          no cronograma, marcada. Abrir antes, ou com degrau maior, troca esse salto por uma rampa.
         </p>` : ''}
         ${resumo.estourouTeto ? `<p class="situacao-tipos"><strong>Nem o vertedouro inteiro segura o nível no teto de ${num(resumo.nivelMaximo)} m:</strong>
           com a capacidade de ${num(resumo.capacidadeMax)} m³/s já toda aberta, sobram ${num(resumo.excedenteSobreTeto, 3)} hm³ que o
@@ -428,9 +428,9 @@ function htmlSaida({ resumo }, cfg) {
       resumo.horasAcimaDoLimite
         ? `${num(resumo.horasAcimaDoLimite)} h · ${num(resumo.volumeAcimaDoLimite, 2)} hm³`
         : 'não ocorre'),
-    item('Forçado pelo teto',
+    item('Manobra imposta pelo teto',
       resumo.passosForcados
-        ? `${num(resumo.horasForcadas)} h · pico ${num(resumo.picoForcado)} m³/s`
+        ? `+${num(resumo.saltoNoTeto)} m³/s de uma vez`
         : 'não ocorre'),
   ])}
         ${grupo('Nível', [
@@ -524,7 +524,7 @@ function desenhar(resultado, cfg) {
     ? `cerca de ${ultimaSobComando.atrasoMin} min de folga depois da hora marcada`
     : ultimaSobComando
       ? 'qualquer atraso leva o nível ao teto'
-      : 'nem no horário a comporta mantém o controle';
+      : 'nem no horário a comporta fica dentro do degrau';
 
   const nome = (cfg.reservatorio?.nome || 'cheia').replace(/\W+/g, '-').toLowerCase();
   $('#btn-exportar-cronograma').onclick = () => baixarCsv(`manobras-${nome}.csv`,
@@ -546,9 +546,9 @@ function tabelaCronograma(linhas) {
     <thead><tr><th>Quando</th><th>Ação</th><th class="num">Abertura alvo</th>
       <th class="num">Variação</th><th class="num">Cota no instante</th><th class="num">Afluência</th></tr></thead>
     <tbody>${linhas.map((m) => `
-      <tr class="${m.acimaDoLimite ? 'violacao-atencao' : ''}">
+      <tr class="${m.imposta ? 'violacao-critico' : m.acimaDoLimite ? 'violacao-atencao' : ''}">
         <td><strong>${hora(m.dataHora)}</strong></td>
-        <td>${m.variacao > 0 ? 'Abrir' : 'Fechar'}${m.acimaDoLimite ? ' · alaga' : ''}</td>
+        <td>${m.variacao > 0 ? 'Abrir' : 'Fechar'}${m.imposta ? ' · <strong>imposta pelo teto</strong>' : ''}${m.acimaDoLimite ? ' · alaga' : ''}</td>
         <td class="num"><strong>${num(m.abertura)} m³/s</strong></td>
         <td class="num">${m.variacao > 0 ? '+' : '−'}${num(Math.abs(m.variacao))}</td>
         <td class="num">${num(m.cota)} m</td>
@@ -561,9 +561,9 @@ function tabelaCronograma(linhas) {
 // alta produzem é vertimento forçado — e é isso que estas tabelas medem.
 function situacao(l) {
   if (l.estourouTeto) return 'vertedouro não dá conta';
-  if (l.passosForcados) return `forçado: salto de ${num(l.saltoNoTeto)} m³/s`;
-  if (l.dentroDoLimite === false) return 'alaga, mas sob comando';
-  return 'sob comando';
+  if (l.passosForcados) return `teto: abrir ${num(l.saltoNoTeto)} m³/s de uma vez`;
+  if (l.dentroDoLimite === false) return 'alaga, mas dentro do degrau';
+  return 'dentro do degrau';
 }
 
 function classe(l) {
@@ -588,8 +588,8 @@ function tabelaAtraso(linhas, resumo) {
         <td>${situacao(l)}</td>
       </tr>`).join('')}</tbody></table></div>
     <p class="ajuda" style="margin-top:12px">${folga
-    ? `Há cerca de <strong>${folga} min</strong> de folga depois da hora marcada (${hora(resumo.inicioAbertura)}) antes de o nível encostar no teto e o vertimento deixar de ser comandado.`
-    : 'Não há folga: qualquer atraso leva o nível ao teto, e o vertimento passa a acompanhar a afluência.'}</p>`;
+    ? `Há cerca de <strong>${folga} min</strong> de folga depois da hora marcada (${hora(resumo.inicioAbertura)}) antes de o nível encostar no teto e a comporta ter de ser aberta de uma vez.`
+    : 'Não há folga: qualquer atraso leva o nível ao teto, e aí a comporta tem de ser aberta de uma vez.'}</p>`;
 }
 
 function tabelaBombas(cenarios, cfg) {
