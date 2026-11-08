@@ -130,7 +130,7 @@ export async function render(container) {
             </details>
 
             <label class="opcao-limites">
-              <input type="checkbox" id="confAtivo" checked />
+              <input type="checkbox" id="confAtivo" />
               <span>Limites de confiança da afluência
                 <small>A previsão é a maior incerteza do problema. Com os limites, a onda e o que
                 ela provoca vêm com a faixa em que podem cair.</small></span>
