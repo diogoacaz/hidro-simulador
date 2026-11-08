@@ -445,9 +445,10 @@ function htmlPropostas(propostas, escolha) {
     return `
       <button type="button" class="proposta${ativo ? ' ativa' : ''}" data-proposta="${chave}"
         aria-pressed="${ativo}">
-        <span class="proposta-nome">${esc(meta.nome)}${
-  chave === 'patamar' && Number.isFinite(s.patamar) ? ` · patamar de ${num(s.patamar)} m³/s` : ''}</span>
+        <span class="proposta-nome">${esc(meta.nome)}</span>
         <span class="proposta-pico">${num(s.picoVert)} <small>m³/s de pico</small></span>
+        ${chave === 'patamar' && Number.isFinite(s.patamar)
+    ? `<span class="proposta-linha">comporta mantida em ${num(s.patamar)} m³/s</span>` : ''}
         <span class="proposta-linha">${s.horasAcimaDoLimite
   ? `${num(s.horasAcimaDoLimite)} h acima de ${num(s.limiteSemDano)} m³/s`
   : `nunca passa de ${num(s.limiteSemDano)} m³/s`}</span>

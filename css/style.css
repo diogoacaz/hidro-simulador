@@ -973,8 +973,10 @@ a { color: inherit; text-decoration: none; }
   margin-top: 14px;
 }
 
+/* minmax(0, 1fr), não 1fr: a coluna de grade não encolhe abaixo do conteúdo
+   mínimo, e com o texto do cartão isso estourava a largura da página. */
 @media (min-width: 820px) {
-  .propostas { grid-template-columns: 1fr 1fr; }
+  .propostas { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 .proposta {
@@ -983,9 +985,12 @@ a { color: inherit; text-decoration: none; }
   align-items: flex-start;
   gap: 4px;
   width: 100%;
+  min-width: 0;
   height: auto;
   padding: 16px 18px;
   text-align: left;
+  /* o botão do app é nowrap; aqui o cartão é texto corrido */
+  white-space: normal;
   background: var(--sutil);
   border: 1px solid transparent;
   border-radius: var(--raio);
@@ -1007,7 +1012,13 @@ a { color: inherit; text-decoration: none; }
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--texto-suave);
+  line-height: 1.4;
 }
+
+.proposta-pico,
+.proposta-linha,
+.proposta-nota,
+.proposta-alerta { max-width: 100%; }
 
 .proposta.ativa .proposta-nome { color: var(--acento-tinta); }
 
