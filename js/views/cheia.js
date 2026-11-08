@@ -455,8 +455,10 @@ function htmlPropostas(propostas, escolha) {
         <span class="proposta-linha">cota máxima ${num(s.cotaMaxima)} m · ${s.manobras} manobras</span>
         <span class="proposta-nota">${esc(meta.resumo)}</span>
         ${chave === 'patamar' && s.reservaAlcancada === false
-    ? `<span class="proposta-alerta">A reserva de ${num(s.reserva)} m não cabe nesta cheia: nem a comporta
-       toda a mantém. Este é o menor pico que ainda segura o nível.</span>` : ''}
+    ? `<span class="proposta-alerta">A reserva de ${num(s.reserva)} m não cabe nesta cheia.
+       ${s.estourouTeto
+    ? 'Nem o vertedouro inteiro segura o nível no teto; este é o que menos o ultrapassa.'
+    : 'Este é o menor pico que ainda segura o nível abaixo do teto.'}</span>` : ''}
       </button>`;
   };
   return `

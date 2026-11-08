@@ -345,9 +345,22 @@ function simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volum
         // Arredondada para baixo no degrau: a folga é contínua e, entrando
         // crua, tirava o comando da grade de manobra.
         const folga = Number.isFinite(degrau) ? Math.floor(bruta / degrau + 1e-9) * degrau : bruta;
-        const alvo = Math.min(vertimento[t], permitido, folga);
-        if (alvo > alvoAtual) alvoAtual = Math.min(alvo, alvoAtual + degrau);
-        else if (alvo < alvoAtual) alvoAtual = Math.max(alvo, alvoAtual - degrau);
+
+        // A folga manda ABRIR com cautela, não FECHAR. Ela existe para não
+        // mandar abrir a comporta antes da cheia, com o reservatório
+        // deplecionado — mas ela oscila com o nível e com as bombas, e
+        // enquanto também governava a descida produzia abre-fecha-abre: a
+        // comporta ia a 30 m³/s, o piso cortava a água por um passo, o
+        // comando caía a zero e subia de novo meia hora depois. Ninguém
+        // fecha e reabre uma comporta no meio da subida de uma cheia.
+        //
+        // Fechar passa a depender só do plano e dos gatilhos de nível. Se
+        // faltar água, a comporta fica aberta e passa o que houver — que é
+        // o que uma comporta faz.
+        const paraSubir = Math.min(vertimento[t], permitido, folga);
+        const paraDescer = Math.min(vertimento[t], permitido);
+        if (paraSubir > alvoAtual) alvoAtual = Math.min(paraSubir, alvoAtual + degrau);
+        else if (paraDescer < alvoAtual) alvoAtual = Math.max(paraDescer, alvoAtual - degrau);
         barrado[t] = vertimento[t] > permitido + 1e-9;
       }
     } else {
@@ -560,7 +573,19 @@ export function propostaDePatamar(cfg, reservaM = 0.1) {
   const reserva = Math.max(0, Number(reservaM) || 0);
   const limiteCota = nivelMaximo - reserva;
 
-  let escolhido = null;
+  // Entre os candidatos que cabem, o de menor pico; empate, o que alaga menos
+  // tempo. Três níveis de exigência, do melhor para o aceitável: com a
+  // reserva pedida, sem ela, e — se nem o teto se segura — o que menos o
+  // ultrapassa. Sem essa escada, uma cheia em que a reserva não coubesse caía
+  // direto no critério de menor cota, que ignora o pico e podia devolver uma
+  // proposta PIOR que a de último recurso.
+  const melhorQue = (a, b) => !a
+    || b.resumo.picoVert < a.resumo.picoVert - 1e-9
+    || (Math.abs(b.resumo.picoVert - a.resumo.picoVert) < 1e-9
+      && b.resumo.horasAcimaDoLimite < a.resumo.horasAcimaDoLimite);
+
+  let comReserva = null;
+  let semReserva = null;
   let menorCota = null;
   const passos = Math.min(400, Math.ceil(capacidadeMax / degrau));
   for (let k = 0; k <= passos; k++) {
@@ -568,18 +593,12 @@ export function propostaDePatamar(cfg, reservaM = 0.1) {
     const r = amortecerUm({ ...cfg, patamarFixo: patamar, confianca: null });
     r.resumo.patamar = patamar;
     if (!menorCota || r.resumo.cotaMaxima < menorCota.resumo.cotaMaxima) menorCota = r;
-    if (r.resumo.cotaMaxima > limiteCota + 1e-9) continue;
-    // Entre os que cabem, o de menor pico; empate, o que alaga menos tempo.
-    if (!escolhido
-      || r.resumo.picoVert < escolhido.resumo.picoVert - 1e-9
-      || (Math.abs(r.resumo.picoVert - escolhido.resumo.picoVert) < 1e-9
-        && r.resumo.horasAcimaDoLimite < escolhido.resumo.horasAcimaDoLimite)) {
-      escolhido = r;
-    }
+    if (!r.resumo.estourouTeto && melhorQue(semReserva, r)) semReserva = r;
+    if (r.resumo.cotaMaxima <= limiteCota + 1e-9 && melhorQue(comReserva, r)) comReserva = r;
   }
 
-  const alcancou = !!escolhido;
-  const base = escolhido || menorCota;
+  const alcancou = !!comReserva;
+  const base = comReserva || semReserva || menorCota;
   if (!base) return null;
 
   // Refeita com os limites de confiança do usuário, se houver: mesmo plano de
