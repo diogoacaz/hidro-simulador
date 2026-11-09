@@ -326,6 +326,10 @@ function simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volum
   const degrau = manobra?.degrau || Infinity;
   let alvoAtual = 0;
   let retiradaPrevia = null;
+  // Depois do pico a comporta fecha acompanhando a recessão, e para isso
+  // precisa saber onde o pico está.
+  let passoPico = 0;
+  for (let t = 1; t < n; t++) if (hidrograma[t] > hidrograma[passoPico]) passoPico = t;
 
   for (let t = 0; t < n; t++) {
     const cota = cotaDoVolume(cav, volumes[t]);
@@ -357,10 +361,39 @@ function simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volum
         // Fechar passa a depender só do plano e dos gatilhos de nível. Se
         // faltar água, a comporta fica aberta e passa o que houver — que é
         // o que uma comporta faz.
-        const paraSubir = Math.min(vertimento[t], permitido, folga);
-        const paraDescer = Math.min(vertimento[t], permitido);
+        let paraSubir = Math.min(vertimento[t], permitido, folga);
+        let paraDescer = Math.min(vertimento[t], permitido);
+        let fechaDireto = false;
+
+        // Passado o pico, a comporta fecha para MANTER O NÍVEL, não para
+        // baixar o reservatório. O envelope desce um degrau por bloco — 20
+        // m³/s por hora com o degrau padrão — e a cheia recua umas duas
+        // vezes mais rápido que isso. A comporta não acompanhava e seguia
+        // vertendo o que as bombas já davam conta de tirar: só para esvaziar
+        // o lago, e acima do limite que alaga. Quem recupera o volume de
+        // espera é o bombeamento, que não machuca ninguém a jusante.
+        //
+        // Por isso o limite de um degrau vale para ABRIR, que é onde está o
+        // risco da onda a jusante. Fechar segue o balanço: o alvo é o que
+        // falta escoar além da retirada, arredondado para cima no degrau.
+        if (t >= passoPico) {
+          const retiradaAgora = retiradaPrevia ? retiradaPrevia.total : 0;
+          const manterNivel = Math.max(0, hidrograma[t] - retiradaAgora);
+          const alvoFecho = Number.isFinite(degrau)
+            ? Math.ceil(manterNivel / degrau - 1e-9) * degrau : manterNivel;
+          if (alvoFecho < paraDescer) { paraDescer = alvoFecho; fechaDireto = true; }
+          // O teto também vale para a abertura: sem ele o envelope, que
+          // desce devagar, reabria a comporta no passo seguinte e o comando
+          // virava serra — fechava de 250 para 180 e voltava a 190, 200, 210.
+          // Não é um alvo, é um limite: enquanto a rampa pedir menos que
+          // isso, ela continua mandando, e a subida segue presa ao degrau.
+          paraSubir = Math.min(paraSubir, alvoFecho);
+        }
+
         if (paraSubir > alvoAtual) alvoAtual = Math.min(paraSubir, alvoAtual + degrau);
-        else if (paraDescer < alvoAtual) alvoAtual = Math.max(paraDescer, alvoAtual - degrau);
+        else if (paraDescer < alvoAtual) {
+          alvoAtual = fechaDireto ? paraDescer : Math.max(paraDescer, alvoAtual - degrau);
+        }
         barrado[t] = vertimento[t] > permitido + 1e-9;
       }
     } else {
