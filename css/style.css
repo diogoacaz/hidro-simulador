@@ -965,6 +965,50 @@ a { color: inherit; text-decoration: none; }
   border-top: 1px solid var(--linha);
 }
 
+/* ---------- As próximas manobras, sempre à vista ---------- */
+
+.proximas {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 1px;
+  background: var(--linha);
+  border-radius: var(--raio-p);
+  overflow: hidden;
+}
+
+.proximas li {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 11px 14px;
+  background: var(--sutil);
+}
+
+.proximas li.imposta { background: var(--acento-suave); }
+
+.proximas-hora {
+  font-size: 1.02rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--texto);
+  min-width: 58px;
+}
+
+.proximas-acao { font-size: 0.85rem; color: var(--texto-medio); }
+.proximas-acao strong { font-variant-numeric: tabular-nums; color: var(--texto); }
+.proximas-acao em { font-style: normal; color: var(--texto-suave); font-variant-numeric: tabular-nums; }
+.proximas-acao b { color: var(--critico); font-weight: 600; }
+
+.proximas-quando {
+  margin-left: auto;
+  font-size: 0.78rem;
+  color: var(--texto-suave);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---------- As duas propostas de vertimento ---------- */
 
 .propostas {
@@ -1173,4 +1217,58 @@ a { color: inherit; text-decoration: none; }
   .conjunto-nome { min-width: 0; flex: 1 1 100%; }
   .conjunto-resumo { margin-left: 0; }
   .acoes button { flex: 1 1 auto; }
+}
+
+/* ---------- Impressão ---------- *
+ * A sala de controle trabalha com papel. Imprimir a tela inteira sai um
+ * formulário de três páginas; o que se leva é o veredito e o cronograma. */
+
+@media print {
+  /* Os painéis inteiros, não só o conteúdo: escondendo apenas o formulário
+     e os cartões, sobravam os títulos órfãos e o espaço deles. */
+  .painel:has(#form-cheia),
+  .painel:has(.propostas),
+  .painel:has(.cenarios),
+  .topo,
+  .rodape,
+  #form-cheia,
+  .referencias,
+  .graficos,
+  .acoes,
+  .propostas,
+  .cenarios,
+  .alerta { display: none !important; }
+
+  .conteudo { max-width: none; padding: 0; }
+
+  .painel {
+    border: none;
+    box-shadow: none;
+    padding: 0 0 14px;
+    margin: 0 0 14px;
+    break-inside: avoid;
+  }
+
+  /* O cronograma inteiro é a folha; as três primeiras linhas da tela viram
+     repetição no papel. Quem abre os <details> é o beforeprint, em app.js. */
+  #proximas,
+  .serie-completa > summary,
+  .ajuste-fino > summary { display: none; }
+
+  .hero { background: none; border: 1px solid #000; color: #000; }
+  .hero-valor, .hero-rotulo, .hero-apoio { color: #000; }
+
+  /* A caixa de rolagem da tela corta a tabela no papel: 10 das 34 linhas. */
+  .tabela-scroll {
+    overflow: visible;
+    max-height: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  table { font-size: 9pt; }
+  thead { display: table-header-group; }
+  tr { break-inside: avoid; }
+
+  body { background: #fff; }
 }

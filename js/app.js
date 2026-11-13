@@ -52,6 +52,23 @@ function avisoSemFirebase() {
     </div>`;
 }
 
+// No papel nao ha clique: o que esta recolhido na tela precisa estar aberto
+// na impressao. CSS nao consegue abrir um <details>, so o atributo open.
+let recolhidos = [];
+window.addEventListener('beforeprint', () => {
+  // O navegador pode disparar beforeprint mais de uma vez para a mesma
+  // impressao (pre-visualizacao e impressao, por exemplo). Sem esta guarda a
+  // segunda captura vem vazia, porque tudo ja esta aberto, e o afterprint
+  // nao tem mais o que fechar.
+  if (recolhidos.length) return;
+  recolhidos = $$('details:not([open])');
+  for (const d of recolhidos) d.open = true;
+});
+window.addEventListener('afterprint', () => {
+  for (const d of recolhidos) d.open = false;
+  recolhidos = [];
+});
+
 window.addEventListener('hashchange', navegar);
 
 if (!db.isConfigured()) {

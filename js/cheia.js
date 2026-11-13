@@ -379,8 +379,11 @@ function simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volum
         if (t >= passoPico) {
           const retiradaAgora = retiradaPrevia ? retiradaPrevia.total : 0;
           const manterNivel = Math.max(0, hidrograma[t] - retiradaAgora);
-          const alvoFecho = Number.isFinite(degrau)
-            ? Math.ceil(manterNivel / degrau - 1e-9) * degrau : manterNivel;
+          // Math.max tira o zero NEGATIVO: com manterNivel em zero,
+          // Math.ceil(-1e-9) devolve -0, e -0 vezes o degrau continua -0 —
+          // o cronograma imprimia "Fechar para -0,00 m3/s".
+          const alvoFecho = Math.max(0, Number.isFinite(degrau)
+            ? Math.ceil(manterNivel / degrau - 1e-9) * degrau : manterNivel);
           if (alvoFecho < paraDescer) { paraDescer = alvoFecho; fechaDireto = true; }
           // O teto também vale para a abertura: sem ele o envelope, que
           // desce devagar, reabria a comporta no passo seguinte e o comando

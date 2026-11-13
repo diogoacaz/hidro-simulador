@@ -23,7 +23,26 @@ const PADRAO_CONJUNTOS = [
 
 const ROTULO_TIPO = { bombeamento: 'Bombeamento', reversao: 'Reversão' };
 
+// O cálculo anda em passos de 15 min, mas isso é detalhe interno: o campo
+// pede minutos, que é como a manobra é combinada na operação.
+const passosDaManobra = (container) =>
+  Math.max(1, Math.round((Number($('#vertMinutos', container).value) || 15) / 15));
+
 const hora = (iso) => (iso ? new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '—');
+const soHora = (iso) => (iso ? new Date(iso).toLocaleString('pt-BR', { timeStyle: 'short' }) : '—');
+
+// Quanto falta, em relação a agora. Numa cheia o operador não calcula a
+// diferença de cabeça: ele precisa de "daqui a 3 h 20".
+function daquiA(iso) {
+  if (!iso) return '';
+  const min = Math.round((new Date(iso).getTime() - Date.now()) / 60000);
+  const abs = Math.abs(min);
+  const texto = abs < 60
+    ? `${abs} min`
+    : `${Math.floor(abs / 60)} h${abs % 60 ? ` ${String(abs % 60).padStart(2, '0')}` : ''}`;
+  if (abs < 2) return 'agora';
+  return min > 0 ? `daqui a ${texto}` : `há ${texto}`;
+}
 
 const RESERVATORIO_ALVO = 'santana';
 
@@ -177,8 +196,8 @@ export async function render(container) {
               <input type="number" id="vertDegrau" value="10" step="any" min="0.1" />
               <small>Quanto a comporta abre ou fecha de uma vez.</small>
             </label>
-            <label>A cada (passos de 15 min)
-              <input type="number" id="vertPassos" value="2" step="1" min="1" />
+            <label>A cada (min)
+              <input type="number" id="vertMinutos" value="30" step="15" min="15" />
               <small id="info-rampa"></small>
             </label>
           </div>
@@ -236,9 +255,9 @@ export async function render(container) {
 
   const atualizarRampa = () => {
     const d = Number($('#vertDegrau', container).value) || 0;
-    const p = Math.max(1, Number($('#vertPassos', container).value) || 1);
+    const p = passosDaManobra(container);
     $('#info-rampa', container).textContent =
-      `${num(d)} m³/s a cada ${p * 15} min · equivale a ${num(d / p)} m³/s por passo`;
+      `${num(d)} m³/s a cada ${p * 15} min · equivale a ${num(d / p / 15 * 60)} m³/s por hora`;
   };
   const atualizarCauda = () => {
     const t50 = Number($('#hRecessao', container).value) || 0;
@@ -262,7 +281,7 @@ export async function render(container) {
   atualizarPortao();
 
   $('#vertDegrau', container).addEventListener('input', atualizarRampa);
-  $('#vertPassos', container).addEventListener('input', atualizarRampa);
+  $('#vertMinutos', container).addEventListener('input', atualizarRampa);
   atualizarRampa();
 
   // O resumo de cada conjunto acompanha tanto a disponibilidade quanto as
@@ -404,7 +423,7 @@ function montarConfig(container, estado) {
       capacidadeMax: Number($('#vertMax', container).value) || 0,
       limiteSemDano: Number($('#vertSemDano', container).value),
       degrau: Number($('#vertDegrau', container).value) || 1,
-      passosPorDegrau: Number($('#vertPassos', container).value) || 1,
+      passosPorDegrau: passosDaManobra(container),
       portoes: {
         inicio: valorNumerico($('#portaoInicio', container)),
         liberaAcima: valorNumerico($('#portaoLibera', container)),
@@ -474,13 +493,23 @@ function htmlPropostas(propostas, escolha) {
 }
 
 function htmlSaida({ resumo }, cfg) {
-  const verdito = !resumo.precisaVerter
-    ? ['Não é preciso verter', `pico afluente de ${num(resumo.qafPico)} m³/s absorvido por bombeamento e reservatório`]
-    : resumo.dentroDoLimite
-      ? [`${num(resumo.picoVert)} m³/s`, `vertimento máximo, dentro do limite de ${num(resumo.limiteSemDano)} m³/s que não alaga`]
-      : [`${num(resumo.picoVert)} m³/s`, `vertimento máximo — acima do limite de ${num(resumo.limiteSemDano)} m³/s por ${num(resumo.horasAcimaDoLimite)} h`];
+  // O destaque é a PRIMEIRA MANOBRA, não o pico. O pico é consequência e já
+  // aparece duas vezes abaixo; o que o operador precisa fazer ao fechar a
+  // tela é abrir a comporta a uma certa hora. Antes isso vinha numa linha
+  // cinza sob um número de 48 px que ninguém executa.
+  const verdito = resumo.precisaVerter
+    ? [soHora(resumo.inicioAbertura), [
+      daquiA(resumo.inicioAbertura),
+      `abrir para ${num(resumo.degrau)} m³/s`,
+      `pico de ${num(resumo.picoVert)} m³/s mais tarde`,
+    ].filter(Boolean).join(' · ')]
+    : ['Não é preciso verter', `pico afluente de ${num(resumo.qafPico)} m³/s absorvido por bombeamento e reservatório`];
 
-  const [inteiro, decimal] = String(verdito[0]).split(/([,.]\d+.*)$/);
+  // O corte em dois tamanhos serve para casas decimais, não para relógio:
+  // num horário os minutos pesam tanto quanto as horas.
+  const [inteiro, decimal] = verdito[0].includes(':')
+    ? [verdito[0], '']
+    : String(verdito[0]).split(/([,.]\d+.*)$/);
   const gravidade = !resumo.precisaVerter ? 'ok' : resumo.dentroDoLimite ? 'atencao' : 'critico';
 
   return `
@@ -496,7 +525,9 @@ function htmlSaida({ resumo }, cfg) {
       </div>
 
       <div class="hero">
-        <p class="hero-rotulo">${resumo.precisaVerter ? 'Vertimento necessário' : 'Veredito'}</p>
+        <p class="hero-rotulo">${resumo.precisaVerter
+    ? `Primeira manobra · ${esc(hora(resumo.inicioAbertura).split(',')[0])}`
+    : 'Veredito'}</p>
         <p class="hero-valor">${esc(inteiro)}<span>${esc(decimal || '')}</span></p>
         <p class="hero-apoio">${esc(verdito[1])}</p>
       </div>
@@ -505,7 +536,10 @@ function htmlSaida({ resumo }, cfg) {
         <div class="situacao-topo">
           <span class="badge badge-${gravidade === 'ok' ? 'ok' : gravidade}">${
   !resumo.precisaVerter ? 'Sem vertimento' : resumo.dentroDoLimite ? 'Vertimento sem alagar' : 'Alaga ribeirinhos'}</span>
-          ${resumo.precisaVerter ? `<span class="situacao-contagem">abrir a comporta a partir de ${hora(resumo.inicioAbertura)}</span>` : ''}
+          ${resumo.precisaVerter ? `<span class="situacao-contagem">pico de ${num(resumo.picoVert)} m³/s${
+  resumo.dentroDoLimite
+    ? `, dentro do limite de ${num(resumo.limiteSemDano)} m³/s`
+    : ` — acima de ${num(resumo.limiteSemDano)} m³/s por ${num(resumo.horasAcimaDoLimite)} h`}</span>` : ''}
         </div>
         ${!resumo.passosForcados && resumo.limites?.passosForcados ? `<p class="situacao-tipos">
           <strong>Com a afluência ${num(resumo.limites.percentual, 0)}% acima do previsto, o nível encosta no teto.</strong>
@@ -585,6 +619,7 @@ function htmlSaida({ resumo }, cfg) {
           <p class="ajuda" id="cronograma-resumo"></p>
         </div>
       </div>
+      <div id="proximas"></div>
       <details class="serie-completa">
         <summary>Ver as manobras uma a uma</summary>
         <div id="cronograma"></div>
@@ -642,10 +677,27 @@ function desenhar(resultado, cfg) {
 
   const cronograma = cronogramaDeManobras(resultado);
   $('#cronograma').innerHTML = tabelaCronograma(cronograma);
+  // As três primeiras manobras ficam fora do detalhe recolhido: é o que se
+  // executa nas próximas horas, e era a única coisa da tela que exigia um
+  // clique para aparecer.
+  $('#proximas').innerHTML = cronograma.length
+    ? `<ol class="proximas">${cronograma.slice(0, 3).map((m) => `
+        <li${m.imposta ? ' class="imposta"' : ''}>
+          <span class="proximas-hora">${esc(soHora(m.dataHora))}</span>
+          <span class="proximas-acao">${m.variacao > 0 ? 'Abrir' : 'Fechar'} para
+            <strong>${num(m.abertura)} m³/s</strong>
+            <em>${m.variacao > 0 ? '+' : '−'}${num(Math.abs(m.variacao))}</em>${
+  m.imposta ? ' <b>imposta pelo teto</b>' : ''}</span>
+          <span class="proximas-quando">${esc(daquiA(m.dataHora))}</span>
+        </li>`).join('')}</ol>
+      ${cronograma.length > 3 ? `<p class="ajuda">…e mais ${cronograma.length - 3} manobras.</p>` : ''}`
+    : '';
+  // A primeira manobra saiu daqui: ela agora é a primeira linha da lista
+  // logo abaixo, e repetir só empurrava a lista para baixo.
   $('#cronograma-resumo').innerHTML = cronograma.length
     ? `<strong>${cronograma.length} manobras</strong> de ${num(resumo.degrau)} m³/s a cada
-       ${resumo.minutosPorDegrau} min. A primeira às <strong>${hora(cronograma[0].dataHora)}</strong>,
-       levando a comporta a ${num(cronograma[0].abertura)} m³/s.`
+       ${resumo.minutosPorDegrau} min, entre ${hora(cronograma[0].dataHora)} e
+       ${hora(cronograma[cronograma.length - 1].dataHora)}.`
     : 'A comporta permanece fechada durante todo o evento.';
   const atraso = custoDoAtraso(cfg);
   $('#atraso').innerHTML = tabelaAtraso(atraso, resumo);
