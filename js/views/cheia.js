@@ -148,22 +148,25 @@ export async function render(container) {
               o corte da cauda.</p>
             </details>
 
-            <label class="opcao-limites">
-              <input type="checkbox" id="confAtivo" />
-              <span>Limites de confiança da afluência
-                <small>A previsão é a maior incerteza do problema. Com os limites, a onda e o que
-                ela provoca vêm com a faixa em que podem cair.</small></span>
-            </label>
-            <div class="grade grade-3" id="caixa-confianca">
-              <label>Incerteza da afluência (± %)
-                <input type="number" id="confPercentual" value="5" step="1" min="0" max="90" />
-                <small>Aplicada para cima e para baixo.</small></label>
-            </div>
           </div>
           <label class="oculto" id="caixa-serie">Afluência de 15 em 15 min (m³/s)
             <textarea id="serieQaf" rows="4" placeholder="2,0&#10;5,5&#10;12,0"></textarea>
             <small id="info-serie"></small>
           </label>
+
+          <!-- Fora das duas caixas: a incerteza da previsão vale tanto para a
+               cheia de projeto quanto para uma série medida. -->
+          <label class="opcao-limites">
+            <input type="checkbox" id="confAtivo" />
+            <span>Limites de confiança da afluência
+              <small>A previsão é a maior incerteza do problema. Com os limites, a onda e o que
+              ela provoca vêm com a faixa em que podem cair.</small></span>
+          </label>
+          <div class="grade grade-3" id="caixa-confianca">
+            <label>Incerteza da afluência (± %)
+              <input type="number" id="confPercentual" value="5" step="1" min="0" max="90" />
+              <small>Aplicada para cima e para baixo.</small></label>
+          </div>
         </fieldset>
 
         <fieldset>
@@ -322,7 +325,9 @@ export async function render(container) {
         patamar: propostaDePatamar(cfg, reserva),
       };
       estado.cfgAtual = cfg;
-      estado.escolha = 'recurso';
+      // O menor pico é a proposta padrão: é a que serve ao objetivo do
+      // simulador. A de último recurso fica ao lado, para comparar.
+      estado.escolha = estado.propostas.patamar ? 'patamar' : 'recurso';
       const saida = $('#saida', container);
       saida.classList.remove('oculto');
       pintarEscolha(container, estado);
@@ -488,28 +493,22 @@ function htmlPropostas(propostas, escolha) {
           baixar o pico significa verter por mais tempo. Escolha e o resto da tela acompanha.</p>
         </div>
       </div>
-      <div class="propostas">${cartao('recurso')}${cartao('patamar')}</div>
+      <div class="propostas">${cartao('patamar')}${cartao('recurso')}</div>
     </section>`;
 }
 
 function htmlSaida({ resumo }, cfg) {
-  // O destaque é a PRIMEIRA MANOBRA, não o pico. O pico é consequência e já
-  // aparece duas vezes abaixo; o que o operador precisa fazer ao fechar a
-  // tela é abrir a comporta a uma certa hora. Antes isso vinha numa linha
-  // cinza sob um número de 48 px que ninguém executa.
-  const verdito = resumo.precisaVerter
-    ? [soHora(resumo.inicioAbertura), [
-      daquiA(resumo.inicioAbertura),
-      `abrir para ${num(resumo.degrau)} m³/s`,
-      `pico de ${num(resumo.picoVert)} m³/s mais tarde`,
-    ].filter(Boolean).join(' · ')]
-    : ['Não é preciso verter', `pico afluente de ${num(resumo.qafPico)} m³/s absorvido por bombeamento e reservatório`];
+  // O destaque é o vertimento máximo — é o número que se comunica a jusante
+  // e o que dimensiona o evento. A hora da primeira manobra, que é o que se
+  // executa, fica na linha da situação logo abaixo.
+  const verdito = !resumo.precisaVerter
+    ? ['Não é preciso verter', `pico afluente de ${num(resumo.qafPico)} m³/s absorvido por bombeamento e reservatório`]
+    : resumo.dentroDoLimite
+      ? [`${num(resumo.picoVert)} m³/s`, `dentro do limite de ${num(resumo.limiteSemDano)} m³/s, que não alaga`]
+      : [`${num(resumo.picoVert)} m³/s`,
+        `acima do limite de ${num(resumo.limiteSemDano)} m³/s por ${num(resumo.horasAcimaDoLimite)} h · ${num(resumo.volumeVertido, 2)} hm³ vertidos`];
 
-  // O corte em dois tamanhos serve para casas decimais, não para relógio:
-  // num horário os minutos pesam tanto quanto as horas.
-  const [inteiro, decimal] = verdito[0].includes(':')
-    ? [verdito[0], '']
-    : String(verdito[0]).split(/([,.]\d+.*)$/);
+  const [inteiro, decimal] = String(verdito[0]).split(/([,.]\d+.*)$/);
   const gravidade = !resumo.precisaVerter ? 'ok' : resumo.dentroDoLimite ? 'atencao' : 'critico';
 
   return `
@@ -525,9 +524,7 @@ function htmlSaida({ resumo }, cfg) {
       </div>
 
       <div class="hero">
-        <p class="hero-rotulo">${resumo.precisaVerter
-    ? `Primeira manobra · ${esc(hora(resumo.inicioAbertura).split(',')[0])}`
-    : 'Veredito'}</p>
+        <p class="hero-rotulo">${resumo.precisaVerter ? 'Vertimento máximo' : 'Veredito'}</p>
         <p class="hero-valor">${esc(inteiro)}<span>${esc(decimal || '')}</span></p>
         <p class="hero-apoio">${esc(verdito[1])}</p>
       </div>
@@ -536,10 +533,9 @@ function htmlSaida({ resumo }, cfg) {
         <div class="situacao-topo">
           <span class="badge badge-${gravidade === 'ok' ? 'ok' : gravidade}">${
   !resumo.precisaVerter ? 'Sem vertimento' : resumo.dentroDoLimite ? 'Vertimento sem alagar' : 'Alaga ribeirinhos'}</span>
-          ${resumo.precisaVerter ? `<span class="situacao-contagem">pico de ${num(resumo.picoVert)} m³/s${
-  resumo.dentroDoLimite
-    ? `, dentro do limite de ${num(resumo.limiteSemDano)} m³/s`
-    : ` — acima de ${num(resumo.limiteSemDano)} m³/s por ${num(resumo.horasAcimaDoLimite)} h`}</span>` : ''}
+          ${resumo.precisaVerter ? `<span class="situacao-contagem">abrir a comporta às
+            <strong>${esc(soHora(resumo.inicioAbertura))}</strong> de
+            ${esc(hora(resumo.inicioAbertura).split(',')[0])} — ${esc(daquiA(resumo.inicioAbertura))}</span>` : ''}
         </div>
         ${!resumo.passosForcados && resumo.limites?.passosForcados ? `<p class="situacao-tipos">
           <strong>Com a afluência ${num(resumo.limites.percentual, 0)}% acima do previsto, o nível encosta no teto.</strong>
