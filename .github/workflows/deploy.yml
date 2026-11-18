@@ -14,17 +14,26 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
+# Dois jobs, não um. Com tudo num job só, o deploy-pages procurava o artefato
+# 270 ms depois de o upload terminar e recebia "Found 0 artifact(s)" — os
+# metadados ainda não estavam consistentes. A fronteira entre jobs dá esse
+# tempo, e é como o modelo oficial do GitHub Pages é escrito.
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
           path: .
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - id: deployment
         uses: actions/deploy-pages@v4
