@@ -8,8 +8,37 @@
    escreve em cima do lime. Cor saturada segue reservada a significado
    (ação primária e severidade de violação). */
 
+/* Inter servida pelo próprio app (licença OFL em fontes/): sem ela o Mac,
+   que não tem Segoe UI, desenhava o app inteiro em Arial. Variável, então
+   um arquivo cobre todos os pesos. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("../fontes/inter-latin-wght-normal.woff2") format("woff2-variations"),
+       url("../fontes/inter-latin-wght-normal.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+                 U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+                 U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("../fontes/inter-latin-ext-wght-normal.woff2") format("woff2-variations"),
+       url("../fontes/inter-latin-ext-wght-normal.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+                 U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0,
+                 U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
 :root {
   color-scheme: light;
+
+  --fonte: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
 
   /* Marca */
   --lime: #c3ff24;
@@ -42,9 +71,22 @@
   --atencao: #b45309;
   --ok: #047857;
 
-  --raio: 12px;
-  --raio-p: 8px;
-  --transicao: 120ms ease;
+  --raio: 16px;
+  --raio-p: 10px;
+  --transicao: 140ms ease;
+
+  /* Profundidade em camadas: um fio de contorno e uma sombra longa e rala.
+     No escuro a sombra some contra o fundo, então quem separa é a borda. */
+  --sombra: 0 1px 2px rgba(20, 51, 45, 0.04), 0 10px 30px -14px rgba(20, 51, 45, 0.14);
+  --sombra-alta: 0 2px 4px rgba(20, 51, 45, 0.05), 0 18px 40px -16px rgba(20, 51, 45, 0.22);
+  --brilho-topo: rgba(195, 255, 36, 0.10);
+
+  /* As mesmas cores das séries nos gráficos (js/charts.js, cores()). */
+  --serie-nivel: #15a06f;
+  --serie-afluente: #2a78d6;
+  --serie-vertido: #eb6834;
+  --serie-bombeado: #6250d6;
+  --serie-revertido: #0e8f9e;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -76,6 +118,16 @@
     --restricao: #c084fc;
     --atencao: #fbbf24;
     --ok: #34d399;
+
+    --sombra: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 12px 30px -18px rgba(0, 0, 0, 0.6);
+    --sombra-alta: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 20px 44px -18px rgba(0, 0, 0, 0.7);
+    --brilho-topo: rgba(195, 255, 36, 0.06);
+
+    --serie-nivel: #199e70;
+    --serie-afluente: #3987e5;
+    --serie-vertido: #d95926;
+    --serie-bombeado: #9085e9;
+    --serie-revertido: #1f9aa8;
   }
 }
 
@@ -83,13 +135,22 @@
 
 body {
   margin: 0;
-  background: var(--canvas);
+  /* Um halo lima muito tênue sob a barra: o canvas deixa de ser chapado
+     sem competir com o conteúdo. */
+  background:
+    radial-gradient(1100px 420px at 50% -160px, var(--brilho-topo), transparent 70%) no-repeat,
+    var(--canvas);
   color: var(--texto);
-  font-family: "Segoe UI", Arial, Helvetica, ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--fonte);
   font-size: 15px;
   line-height: 1.55;
+  font-feature-settings: "cv11", "ss03";
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
+
+::selection { background: color-mix(in srgb, var(--lime) 55%, transparent); color: var(--petroleo); }
 
 /* ---------- Barra superior ---------- */
 
@@ -102,7 +163,7 @@ body {
   justify-content: space-between;
   gap: 28px;
   padding: 0 28px;
-  height: 60px;
+  height: 64px;
   color: var(--topo-texto);
   background: color-mix(in srgb, var(--topo-fundo) 92%, transparent);
   backdrop-filter: saturate(180%) blur(12px);
@@ -157,7 +218,12 @@ body {
   box-shadow: inset 0 0 0 2px var(--lime);
   color: var(--topo-texto);
 }
-.abas a.ativa { color: var(--lime); background: var(--topo-sutil); font-weight: 600; }
+.abas a.ativa {
+  color: var(--petroleo);
+  background: var(--lime);
+  font-weight: 600;
+  box-shadow: 0 0 0 1px rgba(195, 255, 36, 0.35), 0 6px 18px -8px rgba(195, 255, 36, 0.55);
+}
 
 /* ---------- Layout ---------- */
 
@@ -180,9 +246,22 @@ body {
 
 .painel {
   background: var(--superficie);
-  border: 1px solid var(--linha);
+  border: 1px solid color-mix(in srgb, var(--linha) 80%, transparent);
   border-radius: var(--raio);
-  padding: 24px 26px;
+  padding: 26px 28px;
+  box-shadow: var(--sombra);
+}
+
+/* Entrada suave de cada painel novo. Só movimento curto e de opacidade;
+   quem pediu menos movimento ao sistema não vê nada disso. */
+@media (prefers-reduced-motion: no-preference) {
+  .painel { animation: surgir 320ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+  .painel + .painel { animation-delay: 40ms; }
+}
+
+@keyframes surgir {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
 }
 
 .painel > h2 {
@@ -212,14 +291,15 @@ body {
 .cabecalho-painel h2 { margin: 0; font-size: 0.98rem; font-weight: 600; }
 .cabecalho-painel .ajuda { margin: 4px 0 0; }
 
-/* O template titula em caixa alta pesada; os painéis repetem essa voz,
-   em petróleo (o lime não tem contraste sobre superfície clara). */
+/* Títulos em caixa normal, maiores e firmes: a caixa alta miúda ficava
+   reservada aos rótulos (destaque, grupos de métricas), e os dois níveis
+   se confundiam. */
 .painel > h2,
 .cabecalho-painel h2 {
-  font-size: 0.85rem;
-  font-weight: 700;
-  letter-spacing: 0.045em;
-  text-transform: uppercase;
+  font-size: 1.12rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
 }
 
 /* ---------- Formulários ---------- */
@@ -257,12 +337,14 @@ label small {
 input, select, textarea {
   width: 100%;
   font: inherit;
-  font-size: 0.88rem;
-  padding: 9px 11px;
+  font-size: 0.9rem;
+  padding: 10px 12px;
   color: var(--texto);
   background: var(--superficie);
   border: 1px solid var(--linha-forte);
   border-radius: var(--raio-p);
+  box-shadow: 0 1px 1px rgba(20, 51, 45, 0.03);
+  font-variant-numeric: tabular-nums;
   transition: border-color var(--transicao), box-shadow var(--transicao);
 }
 
@@ -273,6 +355,7 @@ input::placeholder, textarea::placeholder { color: var(--texto-suave); }
 input:focus, select:focus, textarea:focus {
   outline: none;
   border-color: var(--acento-tinta);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--acento-tinta) 14%, transparent);
 }
 
 input:hover:not(:disabled):not(:focus),
@@ -335,13 +418,35 @@ fieldset {
 fieldset + fieldset { margin-top: 18px; }
 
 legend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   padding: 0;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
+  font-size: 0.92rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--texto);
+}
+
+/* Formulários em etapas ganham o número de cada uma: a ordem de leitura
+   (o que chega, de onde parte, o que retira, como manobra) fica explícita. */
+form:has(> fieldset + fieldset) { counter-reset: etapa; }
+
+form:has(> fieldset + fieldset) > fieldset > legend::before {
+  counter-increment: etapa;
+  content: counter(etapa);
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
   font-size: 0.72rem;
   font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--texto-medio);
+  color: var(--sobre-acento);
+  background: var(--acento);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--petroleo) 12%, transparent);
 }
 
 /* Primeiro fieldset do painel não precisa de régua acima. */
@@ -357,11 +462,11 @@ button {
   align-items: center;
   justify-content: center;
   gap: 7px;
-  min-height: 34px;
+  min-height: 38px;
   font: inherit;
-  font-size: 0.85rem;
-  font-weight: 500;
-  padding: 7px 14px;
+  font-size: 0.86rem;
+  font-weight: 550;
+  padding: 8px 16px;
   color: var(--texto);
   background: var(--superficie);
   border: 1px solid var(--linha-forte);
@@ -369,7 +474,7 @@ button {
   cursor: pointer;
   white-space: nowrap;
   transition: background var(--transicao), border-color var(--transicao),
-              color var(--transicao), box-shadow var(--transicao);
+              color var(--transicao), box-shadow var(--transicao), transform var(--transicao);
 }
 
 button:hover:not(:disabled) { background: var(--sutil); border-color: var(--texto-suave); }
@@ -377,13 +482,18 @@ button:active:not(:disabled) { background: var(--linha); }
 
 button.primario {
   color: var(--sobre-acento);
-  background: var(--acento);
-  border-color: transparent;
-  font-weight: 600;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.09);
+  background: linear-gradient(180deg, #d0ff4f 0%, var(--acento) 100%);
+  border-color: color-mix(in srgb, var(--petroleo) 14%, transparent);
+  font-weight: 650;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), 0 1px 2px rgba(20, 51, 45, 0.12),
+              0 8px 20px -10px rgba(140, 190, 0, 0.7);
 }
 
-button.primario:hover:not(:disabled) { background: var(--acento-hover); border-color: transparent; }
+button.primario:hover:not(:disabled) {
+  background: linear-gradient(180deg, #d8ff6b 0%, var(--acento-hover) 100%);
+  border-color: color-mix(in srgb, var(--petroleo) 18%, transparent);
+  transform: translateY(-1px);
+}
 button.primario:active:not(:disabled) {
   background: color-mix(in srgb, var(--acento) 86%, var(--petroleo));
   box-shadow: none;
@@ -487,10 +597,9 @@ th {
   z-index: 1;
   padding: 9px 12px;
   text-align: left;
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0;
   color: var(--texto-suave);
   white-space: nowrap;
   background: var(--superficie);
@@ -498,7 +607,8 @@ th {
 }
 
 td {
-  padding: 10px 12px;
+  padding: 11px 12px;
+  font-variant-numeric: tabular-nums;
   border-bottom: 1px solid var(--linha);
   white-space: nowrap;
   color: var(--texto-medio);
@@ -633,9 +743,10 @@ tr.violacao-atencao td { background: color-mix(in srgb, var(--atencao) 7%, trans
 
 .graficos > .grafico-caixa:first-child { border-top: none; padding-top: 4px; }
 .titulo-grafico {
-  margin: 18px 0 2px;
-  font-size: 0.95rem;
+  margin: 22px 0 4px;
+  font-size: 1.02rem;
   font-weight: 650;
+  letter-spacing: -0.015em;
   color: var(--texto);
 }
 
@@ -650,7 +761,7 @@ tr.violacao-atencao td { background: color-mix(in srgb, var(--atencao) 7%, trans
 .grafico-caixa.alta { height: 380px; }
 
 /* Três painéis empilhados precisam de altura para cada um respirar. */
-.grafico-caixa.cheia { height: 740px; }
+.grafico-caixa.cheia { height: 780px; padding-top: 8px; border-top: none; }
 
 /* ---------- Diversos ---------- */
 
@@ -757,11 +868,30 @@ a { color: inherit; text-decoration: none; }
    em petróleo sobre o lime. Vale nos dois temas, porque é exatamente o
    painel claro do template. */
 .hero {
-  margin: 2px 0 16px;
-  padding: 24px 26px;
-  background: var(--lime);
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  margin: 4px 0 18px;
+  padding: 28px 30px 26px;
+  background:
+    radial-gradient(520px 220px at 100% 0%, rgba(255, 255, 255, 0.45), transparent 70%),
+    linear-gradient(135deg, #cfff4a 0%, var(--lime) 55%, #b6f20f 100%);
   color: var(--petroleo);
   border-radius: var(--raio);
+  box-shadow: inset 0 0 0 1px rgba(20, 51, 45, 0.08), 0 16px 36px -22px rgba(110, 150, 0, 0.9);
+}
+
+/* O hidrograma do ícone, grande e quase apagado, ao fundo do destaque. */
+.hero::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  right: -2%;
+  bottom: -6px;
+  width: min(62%, 560px);
+  height: 78%;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 32' preserveAspectRatio='none'%3E%3Cpath d='M0 30 C8 30 13 4 24 4 C34 4 38 20 48 24 C55 26.5 59 27 64 27 V32 H0 Z' fill='%2314332d' fill-opacity='.07'/%3E%3Cpath d='M0 30 C8 30 13 4 24 4 C34 4 38 20 48 24 C55 26.5 59 27 64 27' fill='none' stroke='%2314332d' stroke-opacity='.16' stroke-width='.6'/%3E%3C/svg%3E") no-repeat center / 100% 100%;
+  pointer-events: none;
 }
 
 .hero-rotulo {
@@ -775,10 +905,10 @@ a { color: inherit; text-decoration: none; }
 
 .hero-valor {
   margin: 8px 0 0;
-  font-size: clamp(2.3rem, 7vw, 3.5rem);
+  font-size: clamp(2.5rem, 7.4vw, 3.9rem);
   font-weight: 800;
   line-height: 1;
-  letter-spacing: -0.035em;
+  letter-spacing: -0.045em;
   font-variant-numeric: tabular-nums;
 }
 
@@ -798,12 +928,15 @@ a { color: inherit; text-decoration: none; }
 
 /* Situação: o veredito e onde, no tempo, as violações caem. */
 .situacao {
-  margin-bottom: 16px;
+  margin-bottom: 18px;
   padding: 15px 18px;
   background: var(--sutil);
   border-radius: var(--raio-p);
   border-left: 3px solid var(--linha-forte);
 }
+
+.situacao-ok { background: color-mix(in srgb, var(--ok) 6%, var(--sutil)); }
+.situacao-critico { background: color-mix(in srgb, var(--critico) 5%, var(--sutil)); }
 
 .situacao-ok { border-left-color: var(--ok); }
 .situacao-atencao { border-left-color: var(--atencao); }
@@ -865,20 +998,39 @@ a { color: inherit; text-decoration: none; }
 .metrica-grupo {
   display: flex;
   flex-direction: column;
-  gap: 13px;
-  padding: 16px 18px;
+  gap: 14px;
+  padding: 18px 20px;
   background: var(--sutil);
-  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--linha) 70%, transparent);
+  border-radius: 14px;
 }
 
 .metrica-grupo h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0;
-  font-size: 0.67rem;
+  font-size: 0.68rem;
   font-weight: 700;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--texto-suave);
 }
+
+/* O ponto colorido é a cor da série no gráfico: o grupo "Vertimento" é o
+   laranja do painel de baixo, o "Nível" é o verde do de cima. */
+.metrica-grupo[data-serie] h3::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--cor-serie);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cor-serie) 20%, transparent);
+}
+
+.metrica-grupo[data-serie="nivel"] { --cor-serie: var(--serie-nivel); }
+.metrica-grupo[data-serie="vertido"] { --cor-serie: var(--serie-vertido); }
+.metrica-grupo[data-serie="bombeado"] { --cor-serie: var(--serie-bombeado); }
 
 .metrica { display: flex; flex-direction: column; gap: 2px; }
 .metrica > span { font-size: 0.73rem; color: var(--texto-suave); line-height: 1.35; }
@@ -910,9 +1062,9 @@ a { color: inherit; text-decoration: none; }
 .opcao-limites small { display: block; margin-top: 2px; font-weight: 400; }
 
 .metrica > strong {
-  font-size: 0.98rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-size: 1.02rem;
+  font-weight: 650;
+  letter-spacing: -0.015em;
   font-variant-numeric: tabular-nums;
 }
 
@@ -993,8 +1145,9 @@ a { color: inherit; text-decoration: none; }
 .proximas li.imposta { background: var(--acento-suave); }
 
 .proximas-hora {
-  font-size: 1.02rem;
-  font-weight: 650;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums;
   color: var(--texto);
   min-width: 58px;
@@ -1121,17 +1274,32 @@ a { color: inherit; text-decoration: none; }
   white-space: normal;
   background: var(--sutil);
   border: 1px solid transparent;
-  border-radius: var(--raio);
+  border-radius: 14px;
   cursor: pointer;
-  transition: border-color var(--transicao), background var(--transicao);
+  transition: border-color var(--transicao), background var(--transicao),
+              box-shadow var(--transicao), transform var(--transicao);
 }
 
-.proposta:hover { border-color: var(--linha-forte); }
+.proposta:hover:not(.ativa) { border-color: var(--linha-forte); transform: translateY(-1px); }
 
 .proposta.ativa {
+  position: relative;
   background: var(--superficie);
   border-color: var(--acento-tinta);
-  box-shadow: inset 0 0 0 1px var(--acento-tinta);
+  box-shadow: inset 0 0 0 1px var(--acento-tinta), var(--sombra-alta);
+}
+
+/* Selo de escolhida, no canto do cartão. */
+.proposta.ativa::after {
+  content: "";
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--acento) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8.4 6.8 11 12 5.4' fill='none' stroke='%2314332d' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat center / 14px;
+  box-shadow: inset 0 0 0 1px rgba(20, 51, 45, 0.12);
 }
 
 .proposta-nome {
@@ -1151,9 +1319,9 @@ a { color: inherit; text-decoration: none; }
 .proposta.ativa .proposta-nome { color: var(--acento-tinta); }
 
 .proposta-pico {
-  font-size: 1.6rem;
-  font-weight: 650;
-  letter-spacing: -0.02em;
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
   color: var(--texto);
   line-height: 1.1;
@@ -1297,6 +1465,7 @@ a { color: inherit; text-decoration: none; }
   .grafico-caixa.cheia { height: 630px; }
   .graficos-par { grid-template-columns: 1fr; }
   .hero { padding: 20px 18px; }
+  .hero::after { width: 70%; height: 42%; opacity: 0.6; }
   .metricas { grid-template-columns: 1fr; }
   .conjunto-nome { min-width: 0; flex: 1 1 100%; }
   .conjunto-resumo { margin-left: 0; }
@@ -1340,7 +1509,9 @@ a { color: inherit; text-decoration: none; }
   .serie-completa > summary,
   .ajuste-fino > summary { display: none; }
 
-  .hero { background: none; border: 1px solid #000; color: #000; }
+  .hero { background: none; border: 1px solid #000; color: #000; box-shadow: none; }
+  .hero::after { display: none; }
+  .painel { animation: none; }
   .hero-valor, .hero-rotulo, .hero-apoio { color: #000; }
 
   /* A caixa de rolagem da tela corta a tabela no papel: 10 das 34 linhas. */

@@ -5,7 +5,7 @@ import * as db from '../db.js';
 import { limitesCav } from '../cav.js';
 import { simular, MODOS, ROTULOS_MODO, formatarDuracao } from '../simulation.js';
 import { lerArquivo, extrairSerie, lerListaNumeros } from '../planilha.js';
-import { $, $$, esc, num, toast, comBotao, valorNumerico, paraInputDateTime } from '../ui.js';
+import { $, $$, esc, num, toast, comBotao, valorNumerico, paraInputDateTime, proximoQuartoDeHora } from '../ui.js';
 import * as resultadoView from './resultado.js';
 
 // Campos exigidos por modo (o campo ausente é a incógnita).
@@ -107,7 +107,7 @@ export async function render(container) {
 
     <div id="area-resultado" class="oculto">${resultadoView.html()}</div>`;
 
-  $('#dataInicial', container).value = paraInputDateTime(new Date());
+  $('#dataInicial', container).value = paraInputDateTime(proximoQuartoDeHora());
 
   const estado = { cav: null, reservatorio: null, ultimo: null };
 

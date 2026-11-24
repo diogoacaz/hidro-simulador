@@ -10,7 +10,7 @@ import * as db from '../db.js';
 import { limitesCav, volumeDaCota } from '../cav.js';
 import { amortecerCheia, propostaDePatamar, simularEditado, hidrogramaCheia, cenariosDeBombeamento, cronogramaDeManobras, custoDoAtraso } from '../cheia.js';
 import { graficoCheia } from '../charts.js';
-import { $, $$, esc, num, toast, comBotao, valorNumerico, paraInputDateTime } from '../ui.js';
+import { $, $$, esc, num, toast, comBotao, valorNumerico, paraInputDateTime, proximoQuartoDeHora } from '../ui.js';
 import { lerListaNumeros, baixarCsv, paraNumero } from '../planilha.js';
 
 // As duas retiradas de Santana. Vigário bombeia para o sistema; Santa
@@ -240,7 +240,7 @@ export async function render(container) {
 
     <div id="saida" class="oculto"></div>`;
 
-  $('#dataInicial', container).value = paraInputDateTime(new Date());
+  $('#dataInicial', container).value = paraInputDateTime(proximoQuartoDeHora());
 
   const estado = { cav, reservatorio, teto, piso };
 
@@ -667,13 +667,13 @@ function htmlSaida({ resumo }, cfg) {
       resumo.passosForcados
         ? `+${num(resumo.saltoNoTeto)} m³/s de uma vez`
         : 'não ocorre'),
-  ])}
+  ], 'vertido')}
         ${grupo('Nível', [
     item('Início → máximo', `${num(resumo.cotaInicial)} → ${num(resumo.cotaMaxima)} m`,
       faixa(resumo.limites, 'cotaMaxima', 'm')),
     item('Mínimo no período', `${num(resumo.cotaMinima)} m`),
     item('Teto e piso', `${num(resumo.nivelMaximo)} / ${num(resumo.nivelMinimo)} m`),
-  ])}
+  ], 'nivel')}
         ${grupo('Recursos e manobra', [
     item('Volume bombeado', `${num(resumo.volumeBombeado, 2)} hm³`),
     item('Volume revertido', `${num(resumo.volumeRevertido, 2)} hm³`),
@@ -689,7 +689,7 @@ function htmlSaida({ resumo }, cfg) {
             ? `${num(-resumo.antecedenciaMin / 60)} h depois`
             : 'no mesmo instante')
       : '',
-  ].filter(Boolean))}
+  ].filter(Boolean), 'bombeado')}
       </div>
 
       <div class="graficos">
@@ -809,8 +809,9 @@ function lerCelula(input, estado) {
   if (mudou) estado.editados.add(chave); else estado.editados.delete(chave);
 }
 
-function grupo(titulo, itens) {
-  return `<div class="metrica-grupo"><h3>${esc(titulo)}</h3>${itens.join('')}</div>`;
+function grupo(titulo, itens, serie = '') {
+  const marca = serie ? ` data-serie="${esc(serie)}"` : '';
+  return `<div class="metrica-grupo"${marca}><h3>${esc(titulo)}</h3>${itens.join('')}</div>`;
 }
 function item(rotulo, valor, nota = '') {
   return `<div class="metrica"><span>${esc(rotulo)}</span><strong>${valor}</strong>${

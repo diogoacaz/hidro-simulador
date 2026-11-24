@@ -28,7 +28,17 @@ temaEscuro.addEventListener('change', () => {
   for (const redesenhar of [...refazer.values()]) redesenhar();
 });
 
-const FONTE = { family: '"Segoe UI", Arial, Helvetica, ui-sans-serif, system-ui, sans-serif' };
+const FONTE = { family: '"Inter", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif' };
+
+// O canvas mede o texto com a fonte que estiver carregada na hora do
+// desenho. Se a Inter chega depois, os rótulos ficam medidos em outra fonte
+// e desalinham; um redesenho quando ela termina de carregar resolve.
+function quandoAFonteChegar(grafico) {
+  if (!document.fonts || document.fonts.status === 'loaded') return;
+  document.fonts.ready.then(() => {
+    if (grafico.canvas && grafico.canvas.isConnected) grafico.update('none');
+  });
+}
 
 // Lê uma variável de tema do CSS, para os gráficos acompanharem claro/escuro.
 function varCss(nome, alternativa) {
@@ -101,6 +111,64 @@ function rotuladorTempo(pontos) {
   return (iso) => new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 }
 
+// Passos de marcação, em horas. O eixo escolhe o menor que cabe na
+// largura, e as marcas caem nas horas redondas do relógio (00, 06, 12, 18
+// para 6 h), não em 13:47, 22:17… como saía ao pular pontos a esmo.
+const PASSOS_DE_MARCA = [0.25, 0.5, 1, 2, 3, 4, 6, 12, 24, 48, 72, 168, 336, 720];
+const HORA_MS = 3600000;
+
+const fmtHora = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' });
+const fmtDia = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit' });
+const fmtDiaSemana = new Intl.DateTimeFormat('pt-BR', { weekday: 'short' });
+
+// Instante "de parede": o relógio local transformado em ms, para as
+// divisões por hora e dia caírem na hora local, não em UTC.
+function msLocal(ms) {
+  return ms - new Date(ms).getTimezoneOffset() * 60000;
+}
+
+function eixoDeTempo(pontos) {
+  const tempos = pontos.map((p) => (p && p.dataHora != null ? new Date(p.dataHora).getTime() : NaN));
+  if (tempos.length < 2 || !tempos.every(Number.isFinite)) return null;
+
+  const meiaNoite = (i) => Number.isFinite(tempos[i]) && msLocal(tempos[i]) % (24 * HORA_MS) === 0;
+
+  return {
+    tempos,
+    meiaNoite,
+    afterBuildTicks(eixo) {
+      const util = Math.max(120, eixo.width || eixo.chart.width - 70);
+      const cabem = Math.max(2, Math.min(12, Math.floor(util / 78)));
+      const horas = (tempos[tempos.length - 1] - tempos[0]) / HORA_MS;
+      const passo = PASSOS_DE_MARCA.find((h) => horas / h <= cabem) || PASSOS_DE_MARCA[PASSOS_DE_MARCA.length - 1];
+      const largura = passo * HORA_MS;
+      const marcas = [];
+      for (let i = 0; i < tempos.length; i++) {
+        const balde = Math.floor(msLocal(tempos[i]) / largura);
+        const anterior = i > 0 ? Math.floor(msLocal(tempos[i - 1]) / largura) : null;
+        const emCheio = msLocal(tempos[i]) % largura === 0;
+        if ((i === 0 && emCheio) || (i > 0 && balde !== anterior)) marcas.push({ value: i });
+      }
+      eixo.passoHoras = passo;
+      if (marcas.length >= 2) eixo.ticks = marcas;
+    },
+    rotulo(valor, indice, marcas) {
+      const passo = this.passoHoras || 1;
+      const ms = tempos[valor];
+      if (!Number.isFinite(ms)) return '';
+      const d = new Date(ms);
+      if (passo >= 24) {
+        return passo >= 168 ? fmtDia.format(d) : [fmtDia.format(d), fmtDiaSemana.format(d).replace('.', '')];
+      }
+      // A data só aparece na primeira marca e quando o dia vira: repetir
+      // "24/11" em toda marca é ruído.
+      const anterior = indice > 0 ? new Date(tempos[marcas[indice - 1].value]) : null;
+      const virou = !anterior || anterior.toDateString() !== d.toDateString();
+      return virou ? [fmtHora.format(d), fmtDia.format(d)] : fmtHora.format(d);
+    },
+  };
+}
+
 // Aplica o rotulador escolhido a cada ponto da série.
 function rotularPontos(pontos) {
   const rotular = rotuladorTempo(pontos);
@@ -145,7 +213,7 @@ const pluginFaixas = {
     for (const f of faixas) {
       const y = scales[f.eixo || 'y'];
       if (!y) continue;
-      const limiteTopo = Math.max(chartArea.top, y.top);
+      const limiteTopo = Math.max(chartArea.top, y.top + (f.reservaTopo || 0));
       const limiteBase = Math.min(chartArea.bottom, y.bottom);
       const de = Number.isFinite(f.de) ? y.getPixelForValue(f.de) : limiteBase;
       const ate = Number.isFinite(f.ate) ? y.getPixelForValue(f.ate) : limiteTopo;
@@ -251,12 +319,29 @@ const pluginPaineis = {
     if (!chartArea) return;
 
     ctx.save();
+    // A virada do dia, um fio pontilhado em cada painel. Desenhado aqui, e
+    // não como grade do eixo x, para não atravessar os vãos entre painéis.
+    const dias = opts.meiaNoite && scales.x
+      ? scales.x.ticks.filter((t) => opts.meiaNoite(t.value)).map((t) => scales.x.getPixelForValue(t.value))
+      : [];
     for (const painel of lista) {
       const y = scales[painel.eixo];
       if (!y) continue;
       if (painel.fundo) {
         ctx.fillStyle = painel.fundo;
         ctx.fillRect(chartArea.left, y.top, chartArea.right - chartArea.left, y.bottom - y.top);
+      }
+      if (dias.length) {
+        ctx.strokeStyle = opts.divisor;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 4]);
+        for (const x of dias) {
+          ctx.beginPath();
+          ctx.moveTo(Math.round(x) + 0.5, y.top + ALTURA_CABECALHO);
+          ctx.lineTo(Math.round(x) + 0.5, y.bottom);
+          ctx.stroke();
+        }
+        ctx.setLineDash([]);
       }
     }
     ctx.restore();
@@ -344,10 +429,107 @@ const pluginCruz = {
     ctx.save();
     ctx.beginPath();
     ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
     ctx.strokeStyle = opts.cor;
     ctx.moveTo(x, chartArea.top);
     ctx.lineTo(x, chartArea.bottom);
     ctx.stroke();
+    ctx.setLineDash([]);
+
+    // A hora sob o cursor, numa pílula sobre o eixo: lê-se o instante sem
+    // tirar o olho da linha.
+    const texto = opts.rotulo ? opts.rotulo(ativos[0].index) : '';
+    if (texto) {
+      ctx.font = `600 10.5px ${FONTE.family}`;
+      const larg = ctx.measureText(texto).width + 14;
+      const alt = 18;
+      const px = Math.min(Math.max(x - larg / 2, chartArea.left), chartArea.right - larg);
+      const py = chartArea.bottom + 3;
+      ctx.fillStyle = opts.fundo;
+      ctx.beginPath();
+      ctx.roundRect(px, py, larg, alt, 9);
+      ctx.fill();
+      ctx.fillStyle = opts.tinta;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(texto, px + larg / 2, py + alt / 2 + 0.5);
+    }
+    ctx.restore();
+  },
+};
+
+// Os picos rotulados no próprio traço: o máximo do nível, da afluência e do
+// vertimento são as três leituras que a operação procura primeiro. Num
+// patamar o rótulo vai ao meio dele, não à primeira amostra.
+const pluginPicos = {
+  id: 'picos',
+  afterDatasetsDraw(chart, _args, opts) {
+    const lista = opts && opts.lista;
+    if (!lista || !lista.length) return;
+    const { ctx, chartArea, scales } = chart;
+    if (!chartArea) return;
+    ctx.save();
+    ctx.font = `650 10.5px ${FONTE.family}`;
+    ctx.textBaseline = 'middle';
+    const ocupados = [];
+
+    for (const pico of lista) {
+      const meta = chart.getDatasetMeta(pico.indice);
+      const dados = chart.data.datasets[pico.indice] && chart.data.datasets[pico.indice].data;
+      if (!meta || meta.hidden || !dados || !dados.length) continue;
+      let max = -Infinity;
+      for (const v of dados) if (Number.isFinite(v) && v > max) max = v;
+      if (!Number.isFinite(max) || (pico.minimo != null && max <= pico.minimo)) continue;
+      const tol = Math.max(1e-9, Math.abs(max) * 1e-6);
+      const inicio = dados.findIndex((v) => Number.isFinite(v) && v >= max - tol);
+      let fim = inicio;
+      while (fim + 1 < dados.length && dados[fim + 1] >= max - tol) fim += 1;
+      const i = Math.round((inicio + fim) / 2);
+      const ponto = meta.data[i];
+      if (!ponto) continue;
+      const escala = scales[chart.data.datasets[pico.indice].yAxisID || 'y'];
+      const topo = Math.max(chartArea.top, escala.top + (pico.reservaTopo || 0));
+
+      // Marca no ponto: anel na cor da série sobre a superfície.
+      ctx.beginPath();
+      ctx.arc(ponto.x, ponto.y, 4, 0, Math.PI * 2);
+      ctx.fillStyle = pico.cor;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = opts.superficie;
+      ctx.stroke();
+
+      const texto = pico.texto(max);
+      const larg = ctx.measureText(texto).width + 14;
+      const alt = 20;
+      let px = ponto.x - larg / 2;
+      let py = ponto.y - alt - 9;
+      // Sem espaço em cima, o rótulo vai para o lado do ponto.
+      if (py < topo) {
+        py = ponto.y - alt / 2;
+        px = ponto.x + 10;
+        if (px + larg > chartArea.right) px = ponto.x - 10 - larg;
+      }
+      px = Math.min(Math.max(px, chartArea.left + 2), chartArea.right - larg - 2);
+      // Nunca sobe para o cabeçalho do painel (título e legenda).
+      py = Math.max(py, topo);
+      // Dois rótulos no mesmo lugar: o segundo desce para baixo do primeiro.
+      for (const o of ocupados) {
+        if (px < o.x + o.l && px + larg > o.x && py < o.y + o.a && py + alt > o.y) py = o.y + o.a + 4;
+      }
+      ocupados.push({ x: px, y: py, l: larg, a: alt });
+
+      ctx.fillStyle = opts.superficie;
+      ctx.strokeStyle = rgba(pico.cor, 0.55);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(px, py, larg, alt, 10);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = pico.tinta || pico.cor;
+      ctx.textAlign = 'center';
+      ctx.fillText(texto, px + larg / 2, py + alt / 2 + 0.5);
+    }
     ctx.restore();
   },
 };
@@ -412,13 +594,14 @@ const pluginRotulosFim = {
 
 function opcoesBase({ titulo, tituloEixoY, pontos, legenda = false, unidade = '', casas = 2 }) {
   const c = cores();
+  const tempo = eixoDeTempo(pontos);
   return {
     responsive: true,
     maintainAspectRatio: false,
     animation: false,
     interaction: { mode: 'index', intersect: false },
     // Com rótulo direto no fim da linha o plot cede espaço à direita.
-    layout: { padding: { top: 2, right: legenda ? 74 : 14, bottom: 0, left: 0 } },
+    layout: { padding: { top: 2, right: legenda ? 74 : 14, bottom: 4, left: 0 } },
     plugins: {
       title: {
         display: true,
@@ -440,19 +623,33 @@ function opcoesBase({ titulo, tituloEixoY, pontos, legenda = false, unidade = ''
         },
       },
       tooltip: {
-        backgroundColor: c.superficie,
+        backgroundColor: rgba(c.superficie, 0.97),
         titleColor: c.texto,
         bodyColor: c.medio,
-        borderColor: c.grade,
+        borderColor: rgba(c.suave, 0.28),
         borderWidth: 1,
-        titleFont: { ...FONTE, size: 11, weight: '700' },
-        bodyFont: { ...FONTE, size: 12 },
-        padding: 11,
-        cornerRadius: 10,
-        boxPadding: 5,
+        titleFont: { ...FONTE, size: 11.5, weight: '700' },
+        bodyFont: { ...FONTE, size: 12, weight: '500' },
+        padding: { x: 13, y: 11 },
+        titleMarginBottom: 8,
+        bodySpacing: 6,
+        cornerRadius: 12,
+        caretSize: 0,
+        caretPadding: 12,
+        boxWidth: 8,
+        boxHeight: 8,
+        boxPadding: 6,
         usePointStyle: true,
         displayColors: true,
         callbacks: {
+          // A amostra de cor é a do traço, cheia; antes vinha o degradê da
+          // área, quase transparente.
+          labelPointStyle: () => ({ pointStyle: 'circle', rotation: 0 }),
+          labelColor: (item) => ({
+            borderColor: item.dataset.borderColor,
+            backgroundColor: item.dataset.borderColor,
+            borderWidth: 0,
+          }),
           title: (itens) => dataHoraLocal(pontos[itens[0].dataIndex].dataHora),
           label: (item) => {
             const v = item.parsed.y;
@@ -463,33 +660,60 @@ function opcoesBase({ titulo, tituloEixoY, pontos, legenda = false, unidade = ''
           },
         },
       },
-      cruz: { cor: c.grade },
+      cruz: {
+        cor: rgba(c.suave, 0.6),
+        fundo: c.texto,
+        tinta: c.superficie,
+        rotulo: tempo
+          ? (i) => {
+            const d = new Date(tempo.tempos[i]);
+            return `${fmtDia.format(d)} ${fmtHora.format(d)}`;
+          }
+          : null,
+      },
       rotulosFim: { ativo: legenda, superficie: c.superficie },
     },
     scales: {
-      x: {
-        border: { display: false },
-        grid: { display: false },
-        // `maxTicksLimit: 7` é demais num telefone: sete rótulos de
-        // "08/11 03:23" pedem quase 500 px e se encavalam em 390. O limite
-        // sai da largura real, sem rodar o texto.
-        afterBuildTicks(eixo) {
-          const util = Math.max(120, eixo.chart.width - 70);
-          const cabem = Math.max(2, Math.min(7, Math.floor(util / 95)));
-          if (eixo.ticks.length <= cabem) return;
-          const salto = Math.ceil(eixo.ticks.length / cabem);
-          eixo.ticks = eixo.ticks.filter((_, i) => i % salto === 0);
+      x: tempo
+        ? {
+          border: { display: false, dash: [2, 4] },
+          // Só a virada do dia ganha um fio vertical: é a referência que o
+          // olho usa para contar "amanhã de madrugada".
+          grid: {
+            display: true,
+            drawTicks: false,
+            color: (ctx) => (ctx.tick && tempo.meiaNoite(ctx.tick.value) ? rgba(c.suave, 0.3) : 'transparent'),
+          },
+          afterBuildTicks: tempo.afterBuildTicks,
+          ticks: {
+            autoSkip: false, maxRotation: 0,
+            color: c.suave, font: { ...FONTE, size: 10.5 }, padding: 8,
+            callback: tempo.rotulo,
+          },
+        }
+        : {
+          border: { display: false },
+          grid: { display: false },
+          // `maxTicksLimit: 7` é demais num telefone: sete rótulos de
+          // "08/11 03:23" pedem quase 500 px e se encavalam em 390. O limite
+          // sai da largura real, sem rodar o texto.
+          afterBuildTicks(eixo) {
+            const util = Math.max(120, eixo.chart.width - 70);
+            const cabem = Math.max(2, Math.min(7, Math.floor(util / 95)));
+            if (eixo.ticks.length <= cabem) return;
+            const salto = Math.ceil(eixo.ticks.length / cabem);
+            eixo.ticks = eixo.ticks.filter((_, i) => i % salto === 0);
+          },
+          ticks: {
+            maxTicksLimit: 7, autoSkip: true, maxRotation: 0,
+            color: c.suave, font: { ...FONTE, size: 10.5 }, padding: 6,
+          },
         },
-        ticks: {
-          maxTicksLimit: 7, autoSkip: true, maxRotation: 0,
-          color: c.suave, font: { ...FONTE, size: 10 }, padding: 6,
-        },
-      },
       y: {
         border: { display: false },
         grid: { color: c.grade, drawTicks: false, lineWidth: 1 },
         ticks: {
-          color: c.suave, font: { ...FONTE, size: 10 }, padding: 10, maxTicksLimit: 6,
+          color: c.suave, font: { ...FONTE, size: 10.5 }, padding: 10, maxTicksLimit: 6,
           // Chart.js formata número no padrão da engine, não no do app.
           callback: (v) => Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 3 }),
         },
@@ -504,14 +728,21 @@ function opcoesBase({ titulo, tituloEixoY, pontos, legenda = false, unidade = ''
 
 // Linha padrão: traço fino, sem pontos em repouso e alvo generoso no hover.
 function serieLinha(label, dados, cor, { preencher = true } = {}) {
+  let maior = -Infinity;
+  for (const v of dados) if (Number.isFinite(v) && v > maior) maior = v;
+  // O degradê guardado por geometria: recriá-lo a cada quadro do hover
+  // custa, e a geometria só muda com o tamanho do gráfico.
+  let cache = null;
   return {
     label,
     data: dados,
     borderColor: cor,
-    borderWidth: 2,
+    borderWidth: 2.25,
+    borderCapStyle: 'round',
+    borderJoinStyle: 'round',
     pointRadius: 0,
-    pointHoverRadius: 4,
-    pointHoverBorderWidth: 2,
+    pointHoverRadius: 5,
+    pointHoverBorderWidth: 2.5,
     pointHoverBackgroundColor: cor,
     pointHoverBorderColor: cores().superficie,
     pointHitRadius: 14,
@@ -520,13 +751,27 @@ function serieLinha(label, dados, cor, { preencher = true } = {}) {
     fill: preencher
       ? {
         target: 'origin',
+        // O degradê vai do pico da série ao pé do SEU painel. Antes ia do
+        // alto ao pé do canvas inteiro, e nos painéis empilhados a área do
+        // de baixo nascia quase transparente.
         above: (ctx) => {
           const { chart } = ctx;
           const area = chart.chartArea;
           if (!area) return 'transparent';
-          const g = chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
-          g.addColorStop(0, rgba(cor, temaEscuro.matches ? 0.14 : 0.22));
+          const escala = chart.scales[ctx.dataset.yAxisID || 'y'];
+          const base = escala ? Math.min(area.bottom, escala.bottom) : area.bottom;
+          let topo = escala ? Math.max(area.top, escala.top) : area.top;
+          if (escala && Number.isFinite(maior)) {
+            const py = escala.getPixelForValue(maior);
+            if (Number.isFinite(py)) topo = Math.min(Math.max(py, topo), base - 1);
+          }
+          const chave = `${topo}|${base}|${temaEscuro.matches}`;
+          if (cache && cache.chave === chave) return cache.g;
+          const g = chart.ctx.createLinearGradient(0, topo, 0, base);
+          g.addColorStop(0, rgba(cor, temaEscuro.matches ? 0.26 : 0.24));
+          g.addColorStop(0.6, rgba(cor, temaEscuro.matches ? 0.08 : 0.07));
           g.addColorStop(1, rgba(cor, 0));
+          cache = { chave, g };
           return g;
         },
       }
@@ -538,9 +783,10 @@ function criarGrafico(canvasId, config) {
   destruir(canvasId);
   const canvas = document.getElementById(canvasId);
   if (!canvas) return null;
-  config.plugins = [pluginFaixas, pluginPaineis, pluginLimites, pluginCruz, pluginRotulosFim];
+  config.plugins = [pluginFaixas, pluginPaineis, pluginLimites, pluginPicos, pluginCruz, pluginRotulosFim];
   const grafico = new Chart(canvas.getContext('2d'), config);
   graficos.set(canvasId, grafico);
+  quandoAFonteChegar(grafico);
   return grafico;
 }
 
@@ -762,6 +1008,13 @@ export function graficoCheia(canvasId, serie, limites = {}) {
   if (Number.isFinite(nivelMinimo)) linhas.push({ rotulo: 'piso', valor: nivelMinimo, cor: c.emergencial, eixo: 'yNivel' });
   if (Number.isFinite(limiteSemDano)) linhas.push({ rotulo: 'alaga', valor: limiteSemDano, cor: c.emergencial, eixo: 'yVazao' });
   opcoes.plugins.limites = { lista: linhas, superficie: c.superficie };
+
+  // Acima do teto e abaixo do piso, um véu vermelho muito leve: a zona em
+  // que o nível não pode entrar se lê como região, não só como linha.
+  const faixasNivel = [];
+  if (Number.isFinite(nivelMaximo)) faixasNivel.push({ eixo: 'yNivel', de: nivelMaximo, ate: Infinity, reservaTopo: ALTURA_CABECALHO, cor: rgba(c.emergencial, escuro ? 0.09 : 0.06) });
+  if (Number.isFinite(nivelMinimo)) faixasNivel.push({ eixo: 'yNivel', de: -Infinity, ate: nivelMinimo, cor: rgba(c.emergencial, escuro ? 0.09 : 0.06) });
+  opcoes.plugins.faixas = { lista: faixasNivel };
   // A ordem das chaves é a de baixo para cima: o nível, que é a restrição,
   // fica no topo; o bombeamento, que é o recurso, na base.
   const eixo = (peso, extras = {}) => ({
@@ -831,7 +1084,7 @@ export function graficoCheia(canvasId, serie, limites = {}) {
     vaoA: vao(),
     // Mais marcas no nível: a faixa útil tem pouco mais de 2 m e, com poucas
     // marcas, o passo salta para 2 m e a escala sobe muito acima do teto.
-    yNivel: eixo(3, { ocultarMinimo: true, faixa: faixaNivel, marcas: 6, folgaNoAlto: 0.24 }),
+    yNivel: eixo(3, { ocultarMinimo: true, ocultarMaximo: true, faixa: faixaNivel, marcas: 6, folgaNoAlto: 0.24 }),
   };
 
   // Faixas dos limites de confiança: duas séries cinzas por grandeza, a de
@@ -865,6 +1118,7 @@ export function graficoCheia(canvasId, serie, limites = {}) {
 
   const nivel = serieLinha('Nível (m)', pontos.map((p) => p.cota), c.nivel);
   nivel.yAxisID = 'yNivel';
+  nivel.borderWidth = 2.5;
 
   const afluente = serieLinha('Afluente (m³/s)', pontos.map((p) => p.qaf), c.qaf, { preencher: false });
   afluente.yAxisID = 'yVazao';
@@ -881,8 +1135,12 @@ export function graficoCheia(canvasId, serie, limites = {}) {
     { preencher: false });
   revertido.yAxisID = 'yBomba';
 
+  // Fios da virada do dia só dentro dos painéis (ver pluginPaineis).
+  const tempo = eixoDeTempo(pontos);
+  opcoes.scales.x.grid = { display: false };
   opcoes.plugins.paineis = {
-    divisor: rgba(c.suave, escuro ? 0.3 : 0.22),
+    meiaNoite: tempo ? tempo.meiaNoite : null,
+    divisor: rgba(c.suave, escuro ? 0.34 : 0.3),
     titulo: varCss('--acento-tinta', escuro ? '#c3ff24' : '#1f6b57'),
     medio: c.medio,
     suave: c.suave,
@@ -926,6 +1184,19 @@ export function graficoCheia(canvasId, serie, limites = {}) {
   opcoes.plugins.paineis.lista[1].series[1].indice = indices.vertido;
   opcoes.plugins.paineis.lista[2].series[0].indice = indices.bombeado;
   opcoes.plugins.paineis.lista[2].series[1].indice = indices.revertido;
+
+  const vazao = (v) => `${v.toLocaleString('pt-BR', { maximumFractionDigits: 0 })} m³/s`;
+  opcoes.plugins.picos = {
+    superficie: c.superficie,
+    lista: [
+      { indice: indices.nivel, cor: c.nivel, tinta: c.texto, reservaTopo: ALTURA_CABECALHO,
+        texto: (v) => `máx. ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} m` },
+      { indice: indices.afluente, cor: c.qaf, tinta: c.texto, reservaTopo: ALTURA_CABECALHO,
+        texto: (v) => `pico ${vazao(v)}` },
+      { indice: indices.vertido, cor: c.qdef, tinta: c.texto, reservaTopo: ALTURA_CABECALHO, minimo: 0.05,
+        texto: (v) => `vertido ${vazao(v)}` },
+    ],
+  };
   if (temLimites) {
     opcoes.plugins.paineis.lista[0].series.push(
       { nome: `Limites ${rotuloLimites}`, cor: cinza, faixa: true });

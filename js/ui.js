@@ -32,6 +32,13 @@ export function paraInputDateTime(data) {
   return d.toISOString().slice(0, 16);
 }
 
+// Próximo quarto de hora cheio. Simulação que parte de 13:47 carrega o
+// minuto quebrado em cada passo, no gráfico, na tabela e no cronograma.
+export function proximoQuartoDeHora(agora = new Date()) {
+  const q = 15 * 60000;
+  return new Date(Math.ceil(agora.getTime() / q) * q);
+}
+
 let timerToast = null;
 
 export function toast(mensagem, tipo = 'info') {
