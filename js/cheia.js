@@ -377,6 +377,75 @@ function simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volum
 
   // Simula `horizonte` passos a partir de t com a comporta parada em `alvo`
   // e diz se o piso cortaria a vazão dela em algum deles.
+  // O nível máximo desejado do último recurso; sem ele, o próprio teto.
+  const volumeAlvo = Number.isFinite(manobra?.volumeAlvo) ? Math.min(manobra.volumeAlvo, volumeTeto) : volumeTeto;
+
+  // Maior afluência daqui até o fim, para encerrar cedo as simulações à
+  // frente: com a saída já acima de tudo o que ainda vai chegar, o nível
+  // não sobe mais.
+  const maiorAdiante = new Array(n + 1).fill(0);
+  for (let t = n - 1; t >= 0; t--) maiorAdiante[t] = Math.max(hidrograma[t], maiorAdiante[t + 1]);
+
+  // A comporta em `c` agora e subindo no ritmo máximo da rampa daqui em
+  // diante segura o nível no máximo, sem o teto impor abertura? Subir no
+  // ritmo máximo é o mais que se pode fazer; se nem assim cabe, `c` é pouco.
+  const seguraNoTeto = (t, c) => {
+    let volume = volumes[t];
+    let previa = retiradaPrevia;
+    for (let k = t; k < n; k++) {
+      const j = Math.floor((k - t) / porBloco);
+      const cmd = Math.min(capacidadeMax, Number.isFinite(degrau) ? c + j * degrau : capacidadeMax);
+      const r = repartirSaida({
+        conjuntos, cota: cotaDoVolume(cav, volume), vertProgramado: cmd, volume, qaf: hidrograma[k],
+        volumePiso, volumeTeto, capacidadeMax,
+        retiradaPrevia: previa, podeDesligar: k % PASSOS_POR_DESLIGAMENTO === 0,
+      });
+      if (r.forcado > 1e-9) return false;
+      if (cmd + r.qb >= maiorAdiante[k] - 1e-9) return true;
+      previa = r.retirada;
+      volume += (hidrograma[k] - r.qb - r.qv) * HM3_POR_M3S;
+      if (volume > volumeAlvo + 1e-9) return false;
+    }
+    return true;
+  };
+
+  // Comporta do vertimento de último recurso: guardar no reservatório tudo
+  // o que couber até o nível máximo e verter só o resto.
+  //
+  // Antes do pico da afluência a comporta só abre — e só quando ficar como
+  // está já não seguraria o nível, nem subindo depois no ritmo máximo. É o
+  // mais tarde possível que a rampa permite. Nunca fecha antes do pico: isso
+  // seria abrir, fechar e reabrir.
+  //
+  // Do pico em diante, com o nível no máximo, a comporta vai FECHANDO para
+  // manter o nível ali: em cada manobra, a menor abertura que ainda segura o
+  // nível. Ela acompanha a recessão da cheia, em vez de seguir vertendo e
+  // esvaziar o reservatório. A antiga regra abria cedo pelo envelope de
+  // rampa, seguia abrindo depois do pico e o nível parava 19 cm abaixo do
+  // máximo na cheia de projeto.
+  const comandoNoTeto = (t, atual, permitido) => {
+    const subir = Math.min(permitido, capacidadeMax, abaixoNoDegrau(atual + 1e-9) + degrau);
+    if (!Number.isFinite(degrau)) return seguraNoTeto(t, Math.min(atual, permitido)) ? Math.min(atual, permitido) : subir;
+    if (t < passoPico) {
+      const manter = Math.min(atual, permitido);
+      return seguraNoTeto(t, manter) ? manter : subir;
+    }
+    // Busca binária no múltiplo do degrau: segurar o nível é monótono na
+    // abertura (abrir mais nunca sobe o nível).
+    const topo = Math.min(abaixoNoDegrau(atual + 1e-9), abaixoNoDegrau(permitido + 1e-9));
+    if (!seguraNoTeto(t, Math.min(atual, permitido))) return subir;
+    let lo = 0;
+    let hi = Math.round(topo / degrau);
+    if (seguraNoTeto(t, 0)) return 0;
+    while (hi - lo > 1) {
+      const meio = (lo + hi) >> 1;
+      if (seguraNoTeto(t, meio * degrau)) hi = meio; else lo = meio;
+    }
+    // Comando quebrado (vindo do teto) que já segurava: fica nele só se o
+    // múltiplo logo acima não for menor.
+    return Math.min(hi * degrau, Math.min(atual, permitido));
+  };
+
   // Com `respeitaGatilho`, também conta como corte o nível descer abaixo da
   // cota de "começar a verter": ali a regra de operação fecharia a comporta.
   // Idem para a cota de "liberar acima do limite", quando o comando passa
@@ -480,7 +549,9 @@ function simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volum
         // a afluência pediu), e somar ou tirar um degrau dali mantinha a
         // quebra para sempre: "fechar para 925,56 m³/s".
         const alvoAnterior = alvoAtual;
-        if (paraSubir > alvoAtual) alvoAtual = Math.min(paraSubir, abaixoNoDegrau(alvoAtual + 1e-9) + degrau);
+        if (manobra.controle === 'teto') {
+          alvoAtual = comandoNoTeto(t, alvoAtual, permitido);
+        } else if (paraSubir > alvoAtual) alvoAtual = Math.min(paraSubir, abaixoNoDegrau(alvoAtual + 1e-9) + degrau);
         else if (paraDescer < alvoAtual) {
           alvoAtual = fechaDireto ? paraDescer : Math.max(paraDescer, umDegrauAbaixo(alvoAtual));
         }
@@ -912,6 +983,12 @@ function amortecerUm(cfg) {
   const manobra = {
     degrau, porBloco: passosPorDegrau, limiteSemDano, capacidadeMax,
     portoes: vertedouro.portoes || {},
+    // Sem patamar fixo é o vertimento de último recurso: a comporta é
+    // decidida manobra a manobra para guardar até o nível máximo e, ali,
+    // mantê-lo (ver comandoNoTeto).
+    controle: Number.isFinite(patamarFixo) ? null : 'teto',
+    volumeAlvo: Number.isFinite(cfg.nivelDesejado)
+      ? Math.min(volumeDaCota(cav, cfg.nivelDesejado), volumeTeto) : volumeTeto,
   };
   const estado = simularCom(
     cav, hidrograma, volumeInicial, conjuntos, vertimento,

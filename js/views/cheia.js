@@ -209,6 +209,11 @@ export async function render(container) {
               <input type="number" id="portaoInicio" step="0.01" placeholder="sem restrição" />
               <small>Abaixo dela a comporta fica fechada, mesmo que o cálculo peça abertura.</small>
             </label>
+            <label>Nível máximo desejado (m)
+              <input type="number" id="nivelDesejado" step="0.01" value="${Number.isFinite(teto) ? Number(teto).toFixed(2) : ''}" />
+              <small>Usado pelo vertimento de último recurso: guarda a água até este nível e,
+              ao chegar nele, vai fechando a comporta para mantê-lo — sem esvaziar o reservatório.</small>
+            </label>
             <label>Reserva abaixo do teto (m)
               <input type="number" id="reserva" value="0.10" step="0.05" min="0" max="2" />
               <small>Usada só pela proposta de menor pico: quanto do reservatório ela deixa
@@ -504,6 +509,10 @@ function montarConfig(container, estado) {
   if (nivelInicial > nivelMaximo + 1e-9) {
     throw new Error(`O nível na partida (${num(nivelInicial)} m) está acima do teto de ${num(nivelMaximo)} m.`);
   }
+  const nivelDesejado = valorNumerico($('#nivelDesejado', container)) ?? nivelMaximo;
+  if (nivelDesejado > nivelMaximo + 1e-9 || nivelDesejado <= nivelMinimo) {
+    throw new Error(`O nível máximo desejado precisa ficar entre o piso (${num(nivelMinimo)} m) e o teto (${num(nivelMaximo)} m).`);
+  }
 
   // Manobra: valores que o cálculo arredondaria ou ignoraria em silêncio
   // viram erro, porque mudam o cronograma de abertura sem ninguém ver.
@@ -529,6 +538,7 @@ function montarConfig(container, estado) {
     nivelInicial,
     nivelMaximo,
     nivelMinimo,
+    nivelDesejado,
     conjuntos: lerConjuntos(container),
     confianca: {
       ativo: $('#confAtivo', container).checked,
@@ -582,7 +592,7 @@ function edicaoDoResultado(r) {
 const PROPOSTAS = {
   recurso: {
     nome: 'Vertimento de último recurso',
-    resumo: 'Segura a água enquanto couber e só abre o necessário. Verte o menor volume e pelo menor tempo — ao custo do maior pico.',
+    resumo: 'Guarda a água até o nível máximo desejado, abre só o necessário e, ao chegar nele, vai fechando a comporta para mantê-lo. Verte o menor volume — ao custo do maior pico.',
   },
   patamar: {
     nome: 'Menor pico possível',
@@ -686,6 +696,11 @@ function htmlSaida({ resumo }, cfg) {
           de uma manobra normal. A regra do degrau não se aplica nesse ponto — não há escolha. A manobra está
           no cronograma, marcada. Abrir antes, ou com degrau maior, troca esse salto por uma rampa.
         </p>` : ''}
+        ${!resumo.passosForcados && !resumo.estourouTeto && resumo.patamar == null && !resumo.manual
+    && Number.isFinite(cfg.nivelDesejado) && resumo.cotaMaxima > cfg.nivelDesejado + 0.005
+    ? `<p class="situacao-tipos"><strong>O nível passa do máximo desejado de ${num(cfg.nivelDesejado)} m e chega a ${num(resumo.cotaMaxima)} m.</strong>
+          A comporta abrindo ${num(resumo.degrau)} m³/s a cada ${resumo.minutosPorDegrau} min não consegue segurá-lo ali.
+          Um degrau maior, ou manobras mais frequentes, aproximam o nível do desejado.</p>` : ''}
         ${resumo.estourouTeto ? `<p class="situacao-tipos"><strong>Nem o vertedouro inteiro segura o nível no teto de ${num(resumo.nivelMaximo)} m:</strong>
           com a capacidade de ${num(resumo.capacidadeMax)} m³/s já toda aberta, sobram ${num(resumo.excedenteSobreTeto, 3)} hm³ que o
           reservatório não tem como passar adiante e acabam subindo acima do teto.</p>` : ''}
