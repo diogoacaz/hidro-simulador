@@ -11,7 +11,7 @@ import { limitesCav, volumeDaCota } from '../cav.js';
 import { amortecerCheia, propostaDePatamar, simularEditado, hidrogramaCheia, cenariosDeBombeamento, cronogramaDeManobras, custoDoAtraso } from '../cheia.js';
 import { graficoCheia } from '../charts.js';
 import { $, $$, esc, num, toast, comBotao, valorNumerico, paraInputDateTime, proximoQuartoDeHora } from '../ui.js';
-import { lerListaNumeros, baixarCsv, paraNumero } from '../planilha.js';
+import { baixarCsv, paraNumero } from '../planilha.js';
 
 // As duas retiradas de Santana. Vigário bombeia para o sistema; Santa
 // Cecília reverte para o Paraíba do Sul. Operações distintas, por isso o
@@ -251,9 +251,17 @@ export async function render(container) {
   }));
 
   $('#serieQaf', container).addEventListener('input', () => {
-    const v = lerListaNumeros($('#serieQaf', container).value);
-    $('#info-serie', container).textContent = v.length
-      ? `${v.length} valores → ${(v.length / 4).toFixed(2)} h · pico ${num(Math.max(...v))} m³/s` : '';
+    // Mesma leitura estrita da simulação: o aviso aparece enquanto se digita.
+    const info = $('#info-serie', container);
+    try {
+      const v = lerSerieEstrita($('#serieQaf', container).value);
+      info.classList.remove('erro');
+      info.textContent = v.length
+        ? `${v.length} valores → ${(v.length / 4).toFixed(2)} h · pico ${num(Math.max(...v))} m³/s` : '';
+    } catch (e) {
+      info.classList.add('erro');
+      info.textContent = e.message;
+    }
   });
 
   const atualizarRampa = () => {
@@ -445,12 +453,35 @@ function lerConjuntos(container) {
   });
 }
 
+// Lê a série medida sem descartar nada em silêncio. A leitura tolerante
+// pulava o que não fosse número, e cada valor pulado adiantava em 15 min
+// toda a série seguinte — e com ela a hora de abrir a comporta.
+function lerSerieEstrita(texto) {
+  const valores = [];
+  const invalidos = [];
+  for (const token of String(texto ?? '').split(/[\s;]+/).filter(Boolean)) {
+    const direto = paraNumero(token);
+    if (Number.isFinite(direto)) { valores.push(direto); continue; }
+    // "350,400,420": lista separada por vírgulas. Vírgula sobrando no fim
+    // ("350,") não é valor.
+    for (const parte of token.split(',').filter((p) => p.trim() !== '')) {
+      const v = paraNumero(parte);
+      if (Number.isFinite(v)) valores.push(v); else invalidos.push(parte);
+    }
+  }
+  if (invalidos.length) {
+    const exemplos = invalidos.slice(0, 3).map((v) => `"${v}"`).join(', ');
+    throw new Error(`A série medida tem ${invalidos.length} valor${invalidos.length > 1 ? 'es' : ''} que não ${invalidos.length > 1 ? 'são números' : 'é número'} (${exemplos}). Corrija antes de simular: um valor pulado desloca toda a série em 15 min.`);
+  }
+  return valores;
+}
+
 function montarConfig(container, estado) {
   if (!estado.cav) throw new Error('Selecione um reservatório com tabela CAV.');
 
   const serieEscolhida = $('input[name="fonte"]:checked', container).value === 'serie';
   const hidrograma = serieEscolhida
-    ? lerListaNumeros($('#serieQaf', container).value)
+    ? lerSerieEstrita($('#serieQaf', container).value)
     : hidrogramaCheia({
       base: Number($('#qBase', container).value) || 0,
       pico: Number($('#qPico', container).value) || 0,
@@ -461,6 +492,7 @@ function montarConfig(container, estado) {
       horasDepois: Number($('#hDepois', container).value) || 1,
     });
   if (hidrograma.length < 2) throw new Error('Informe um hidrograma com pelo menos dois valores.');
+  if (hidrograma.some((q) => q < 0)) throw new Error('A afluência não pode ser negativa.');
 
   const nivelInicial = valorNumerico($('#nivelInicial', container));
   if (nivelInicial == null) throw new Error('Informe o nível na partida.');
@@ -468,6 +500,26 @@ function montarConfig(container, estado) {
   const { teto: nivelMaximo, piso: nivelMinimo } = estado;
   if (!Number.isFinite(nivelMaximo) || !Number.isFinite(nivelMinimo)) {
     throw new Error('Cadastre os níveis de emergência do reservatório antes de simular a cheia.');
+  }
+  if (nivelInicial > nivelMaximo + 1e-9) {
+    throw new Error(`O nível na partida (${num(nivelInicial)} m) está acima do teto de ${num(nivelMaximo)} m.`);
+  }
+
+  // Manobra: valores que o cálculo arredondaria ou ignoraria em silêncio
+  // viram erro, porque mudam o cronograma de abertura sem ninguém ver.
+  const degrau = Number($('#vertDegrau', container).value);
+  if (!(degrau >= 1)) throw new Error('O degrau de manobra precisa ser de pelo menos 1 m³/s.');
+  const minutos = Number($('#vertMinutos', container).value);
+  if (!(minutos >= 15) || Math.abs(minutos / 15 - Math.round(minutos / 15)) > 1e-9) {
+    throw new Error('O intervalo entre manobras precisa ser múltiplo de 15 min (15, 30, 45, 60…), o passo do cálculo.');
+  }
+  const capacidadeMax = Number($('#vertMax', container).value);
+  if (!(capacidadeMax > 0)) throw new Error('Informe a capacidade máxima do vertedouro.');
+  if (degrau > capacidadeMax) throw new Error('O degrau de manobra é maior que a capacidade do vertedouro.');
+  const inicio = valorNumerico($('#portaoInicio', container));
+  const liberaAcima = valorNumerico($('#portaoLibera', container));
+  if (inicio != null && liberaAcima != null && liberaAcima < inicio) {
+    throw new Error(`A cota para liberar acima do limite (${num(liberaAcima)} m) está abaixo da cota para começar a verter (${num(inicio)} m).`);
   }
 
   return {
@@ -483,14 +535,11 @@ function montarConfig(container, estado) {
       percentual: Number($('#confPercentual', container).value) || 0,
     },
     vertedouro: {
-      capacidadeMax: Number($('#vertMax', container).value) || 0,
+      capacidadeMax,
       limiteSemDano: Number($('#vertSemDano', container).value),
-      degrau: Number($('#vertDegrau', container).value) || 1,
+      degrau,
       passosPorDegrau: passosDaManobra(container),
-      portoes: {
-        inicio: valorNumerico($('#portaoInicio', container)),
-        liberaAcima: valorNumerico($('#portaoLibera', container)),
-      },
+      portoes: { inicio, liberaAcima },
     },
     dataInicial: new Date($('#dataInicial', container).value || Date.now()),
   };

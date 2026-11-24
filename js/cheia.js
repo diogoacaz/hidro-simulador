@@ -302,17 +302,21 @@ function repartirSaida({
   // O vertimento é o último recurso. Se a comporta vai passar água neste
   // passo — pela rampa programada ou porque o teto obriga —, antes dela
   // entra tudo o que as máquinas podem tirar: Vigário inteiro, depois Santa
-  // Cecília. A água que as bombas assumem sai do vertimento, não se soma a
-  // ele; a defluência total fica a mesma, salvo o arredondamento de máquina.
-  // A regra de sustentação não segura as bombas aqui: ela existe para não
-  // esvaziar o reservatório perto do piso, e com a comporta aberta essa
-  // água sairia de qualquer jeito.
+  // Cecília. A regra de sustentação não segura as bombas aqui: ela existe
+  // para não esvaziar o reservatório perto do piso, e com a comporta aberta
+  // essa água sairia de qualquer jeito.
+  //
+  // O comando da comporta NÃO é reduzido pelas bombas que entram: o plano
+  // de abertura já conta com o bombeamento inteiro (ver a folga em
+  // simularCom), e o que o cronograma manda abrir é exatamente o que a
+  // simulação faz passar. Reduzir aqui fazia o cronograma mandar abrir
+  // 10 m³/s num passo em que o cálculo considerava a comporta fechada.
   if (qv > 1e-9 || saidaMin > qb + 1e-9) {
     const cheia = retiradaPossivel(conjuntos, cota, saidaMax, retirada.unidades);
     if (cheia && cheia.total > qb + 1e-9) {
-      qv = Math.max(0, qv - (cheia.total - qb));
       retirada = cheia;
       qb = cheia.total;
+      qv = Math.min(vertProgramado, Math.max(0, saidaMax - qb));
     }
   }
   const contido = qb < disponivelBomba - 1e-9 || qv < vertProgramado - 1e-9;
@@ -359,6 +363,48 @@ function simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volum
   // precisa saber onde o pico está.
   let passoPico = 0;
   for (let t = 1; t < n; t++) if (hidrograma[t] > hidrograma[passoPico]) passoPico = t;
+
+  const abaixoNoDegrau = (q) => (Number.isFinite(degrau) ? Math.floor(q / degrau + 1e-9) * degrau : q);
+  // Um degrau abaixo de q, partindo do múltiplo: de 30 vai a 20; de 925,56
+  // vai a 925. Comparar o múltiplo com q, em vez de subtrair um épsilon antes
+  // de arredondar, não depende do tamanho do degrau — com degrau de 1000 o
+  // épsilon sumia na divisão e o laço que desce a comporta não terminava.
+  const umDegrauAbaixo = (q) => {
+    if (!Number.isFinite(degrau)) return 0;
+    const m = abaixoNoDegrau(q);
+    return Math.max(0, m < q - 1e-9 ? m : m - degrau);
+  };
+
+  // Simula `horizonte` passos a partir de t com a comporta parada em `alvo`
+  // e diz se o piso cortaria a vazão dela em algum deles.
+  // Com `respeitaGatilho`, também conta como corte o nível descer abaixo da
+  // cota de "começar a verter": ali a regra de operação fecharia a comporta.
+  // Idem para a cota de "liberar acima do limite", quando o comando passa
+  // do limite que não alaga: abaixo dela a regra limitaria a comporta.
+  const gatilhoInicio = Number(manobra?.portoes?.inicio);
+  const gatilhoLibera = Number(manobra?.portoes?.liberaAcima);
+  const limiteSemDanoManobra = Number(manobra?.limiteSemDano);
+  const cortadoNoPiso = (t, alvo, horizonte = porBloco, respeitaGatilho = false) => {
+    let volume = volumes[t];
+    let previa = retiradaPrevia;
+    for (let k = t; k < Math.min(n, t + horizonte); k++) {
+      if (respeitaGatilho && k > t) {
+        const c = cotaDoVolume(cav, volume);
+        if (Number.isFinite(gatilhoInicio) && c < gatilhoInicio - 1e-9) return true;
+        if (Number.isFinite(gatilhoLibera) && Number.isFinite(limiteSemDanoManobra)
+          && alvo > limiteSemDanoManobra + 1e-9 && c < gatilhoLibera - 1e-9) return true;
+      }
+      const r = repartirSaida({
+        conjuntos, cota: cotaDoVolume(cav, volume), vertProgramado: alvo, volume, qaf: hidrograma[k],
+        volumePiso, volumeTeto, capacidadeMax,
+        retiradaPrevia: previa, podeDesligar: k % PASSOS_POR_DESLIGAMENTO === 0,
+      });
+      if (r.forcado <= 1e-9 && r.qv < alvo - 1e-9) return true;
+      previa = r.retirada;
+      volume += (hidrograma[k] - r.qb - r.qv) * HM3_POR_M3S;
+    }
+    return false;
+  };
 
   for (let t = 0; t < n; t++) {
     const cota = cotaDoVolume(cav, volumes[t]);
@@ -429,9 +475,38 @@ function simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volum
           paraSubir = Math.min(paraSubir, alvoFecho);
         }
 
-        if (paraSubir > alvoAtual) alvoAtual = Math.min(paraSubir, alvoAtual + degrau);
+        // Os degraus partem sempre de um múltiplo do degrau. Depois de uma
+        // abertura imposta pelo teto o comando fica num valor quebrado (o que
+        // a afluência pediu), e somar ou tirar um degrau dali mantinha a
+        // quebra para sempre: "fechar para 925,56 m³/s".
+        const alvoAnterior = alvoAtual;
+        if (paraSubir > alvoAtual) alvoAtual = Math.min(paraSubir, abaixoNoDegrau(alvoAtual + 1e-9) + degrau);
         else if (paraDescer < alvoAtual) {
-          alvoAtual = fechaDireto ? paraDescer : Math.max(paraDescer, alvoAtual - degrau);
+          alvoAtual = fechaDireto ? paraDescer : Math.max(paraDescer, umDegrauAbaixo(alvoAtual));
+        }
+
+        // Nunca mandar abrir mais do que o reservatório sustenta. O bloco
+        // seguinte é simulado antes: se em algum passo dele a comporta não
+        // conseguiria passar o comando sem levar o nível abaixo do piso, o
+        // comando desce um degrau, até caber. Sem isto o cronograma mandava
+        // abrir 25 m³/s com o lago no piso e 6 m³/s disponíveis — o operador
+        // que obedecesse esvaziaria o reservatório abaixo do mínimo, e a
+        // simulação, que só deixava passar os 6, não mostrava isso.
+        //
+        // Para ABRIR mais, a exigência é maior: a nova abertura tem de se
+        // sustentar até o pico da afluência. Sem isto a comporta abria com o
+        // lago 5 cm acima do piso, gastava essa sobra em uma hora, era
+        // obrigada a fechar e reabria quando a cheia subia — o abre-fecha-abre
+        // que não se faz. Abrir só o que dá para manter.
+        if (alvoAtual > alvoAnterior + 1e-9) {
+          const horizonte = t < passoPico ? Math.max(porBloco, passoPico - t + 1) : porBloco;
+          for (let guarda = 0; guarda < 10000 && alvoAtual > alvoAnterior + 1e-9
+            && cortadoNoPiso(t, alvoAtual, horizonte, true); guarda++) {
+            alvoAtual = Math.max(alvoAnterior, umDegrauAbaixo(alvoAtual));
+          }
+        }
+        for (let guarda = 0; guarda < 10000 && alvoAtual > 1e-9 && cortadoNoPiso(t, alvoAtual); guarda++) {
+          alvoAtual = umDegrauAbaixo(alvoAtual);
         }
         barrado[t] = vertimento[t] > permitido + 1e-9;
       }
@@ -796,6 +871,14 @@ function amortecerUm(cfg) {
     vertedouro = {},
     dataInicial = new Date(),
   } = cfg;
+
+  // Entrada inválida para aqui, com mensagem, em vez de virar NaN no
+  // cronograma inteiro: um único passo sem número contaminava todos os
+  // seguintes pelo balanço.
+  if (!Array.isArray(hidrograma) || !hidrograma.length) throw new Error('Hidrograma vazio.');
+  const ruim = hidrograma.findIndex((q) => !Number.isFinite(q) || q < 0);
+  if (ruim >= 0) throw new Error(`Afluência inválida no passo ${ruim + 1}: ${hidrograma[ruim]}.`);
+  if (!Number.isFinite(nivelInicial)) throw new Error('Nível inicial inválido.');
 
   const degrau = Math.max(0.0001, Number(vertedouro.degrau) || 0.0001);           // m³/s por manobra
   const passosPorDegrau = Math.max(1, Math.round(Number(vertedouro.passosPorDegrau) || 1));
