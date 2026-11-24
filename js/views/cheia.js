@@ -677,7 +677,9 @@ function htmlSaida({ resumo }, cfg) {
         ${grupo('Recursos e manobra', [
     item('Volume bombeado', `${num(resumo.volumeBombeado, 2)} hm³`),
     item('Volume revertido', `${num(resumo.volumeRevertido, 2)} hm³`),
-    item('Retirada na cota', `${num(resumo.bombeamentoMinimo)} a ${num(resumo.bombeamentoMaximo)} m³/s`),
+    item('Retirada na cota', Math.abs(resumo.bombeamentoMaximo - resumo.bombeamentoMinimo) < 0.005
+      ? `${num(resumo.bombeamentoMaximo)} m³/s em toda a cheia`
+      : `${num(resumo.bombeamentoMinimo)} a ${num(resumo.bombeamentoMaximo)} m³/s`),
     item('Manobras', resumo.manual
       ? `${resumo.manobras} definidas na edição`
       : `${resumo.manobras} de ${num(resumo.degrau)} m³/s a cada ${resumo.minutosPorDegrau} min`),

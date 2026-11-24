@@ -9,6 +9,9 @@ import * as viewReservatorios from './views/reservatorios.js';
 import * as viewRegistros from './views/registros.js';
 import * as viewHistorico from './views/historico.js';
 import { destruirTodos } from './charts.js';
+import { iniciarTema } from './tema.js';
+
+iniciarTema();
 
 const ROTAS = {
   simular: viewSimular,

@@ -10,7 +10,7 @@
 
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
 import {
-  getFirestore, collection, doc, addDoc, setDoc, getDoc, getDocs, updateDoc,
+  getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, addDoc, setDoc, getDoc, getDocs, updateDoc,
   deleteDoc, query, where, orderBy, limit, serverTimestamp, writeBatch,
 } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js';
 import { firebaseConfig } from './firebase-config.js';
@@ -20,7 +20,18 @@ let db = null;
 function getDb() {
   if (!db) {
     const app = initializeApp(firebaseConfig);
-    db = getFirestore(app);
+    // Cópia local dos dados (IndexedDB), compartilhada entre abas: com a
+    // rede caída o app ainda lê usinas, reservatórios e CAV, e as gravações
+    // ficam na fila até a conexão voltar. Sem IndexedDB (alguns modos
+    // privados), segue só em memória, como antes.
+    try {
+      db = initializeFirestore(app, {
+        localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+      });
+    } catch (erro) {
+      console.warn('Firestore sem cache local:', erro);
+      db = getFirestore(app);
+    }
   }
   return db;
 }

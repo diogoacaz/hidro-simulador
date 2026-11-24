@@ -12,6 +12,7 @@
 //    gráficos de série única: dois eixos y num só plot inventam correlação.
 
 import { dataHoraLocal } from './ui.js';
+import { temaEscuroAtivo, aoMudarTema } from './tema.js';
 
 const MAX_PONTOS_GRAFICO = 1200;
 const graficos = new Map();
@@ -21,10 +22,8 @@ const graficos = new Map();
 // gráfico para redesenhá-los quando o tema mudar.
 const refazer = new Map();
 
-// A referência à MediaQueryList precisa ser mantida: uma MQL sem referência
-// forte pode ser coletada e parar de notificar.
-const temaEscuro = matchMedia('(prefers-color-scheme: dark)');
-temaEscuro.addEventListener('change', () => {
+// Vale tanto a troca do sistema quanto o botão de tema.
+aoMudarTema(() => {
   for (const redesenhar of [...refazer.values()]) redesenhar();
 });
 
@@ -58,7 +57,7 @@ function varCss(nome, alternativa) {
  *   sobre o verde-petróleo.
  */
 function cores() {
-  const escuro = temaEscuro.matches;
+  const escuro = temaEscuroAtivo();
   return {
     // Paleta categórica validada nos dois temas (ΔE normal e por daltonismo,
     // contraste >= 3:1 contra a superfície de cada um). A ordem é a dos painéis.
@@ -765,11 +764,11 @@ function serieLinha(label, dados, cor, { preencher = true } = {}) {
             const py = escala.getPixelForValue(maior);
             if (Number.isFinite(py)) topo = Math.min(Math.max(py, topo), base - 1);
           }
-          const chave = `${topo}|${base}|${temaEscuro.matches}`;
+          const chave = `${topo}|${base}|${temaEscuroAtivo()}`;
           if (cache && cache.chave === chave) return cache.g;
           const g = chart.ctx.createLinearGradient(0, topo, 0, base);
-          g.addColorStop(0, rgba(cor, temaEscuro.matches ? 0.26 : 0.24));
-          g.addColorStop(0.6, rgba(cor, temaEscuro.matches ? 0.08 : 0.07));
+          g.addColorStop(0, rgba(cor, temaEscuroAtivo() ? 0.26 : 0.24));
+          g.addColorStop(0.6, rgba(cor, temaEscuroAtivo() ? 0.08 : 0.07));
           g.addColorStop(1, rgba(cor, 0));
           cache = { chave, g };
           return g;
@@ -819,7 +818,7 @@ export function graficoNivel(canvasId, serie, limites = {}, restricoes = []) {
   const { nivelMinOperacional: minOp, nivelMaxOperacional: maxOp } = limites;
   const { nivelMinEmergencial: minEm, nivelMaxEmergencial: maxEm } = limites;
   if (Number.isFinite(minOp) || Number.isFinite(maxOp)) {
-    faixas.push({ de: minOp, ate: maxOp, cor: rgba(c.nivel, temaEscuro.matches ? 0.05 : 0.07) });
+    faixas.push({ de: minOp, ate: maxOp, cor: rgba(c.nivel, temaEscuroAtivo() ? 0.05 : 0.07) });
   }
   if (Number.isFinite(minEm)) faixas.push({ de: -Infinity, ate: minEm, cor: rgba(c.emergencial, 0.08) });
   if (Number.isFinite(maxEm)) faixas.push({ de: maxEm, ate: Infinity, cor: rgba(c.emergencial, 0.08) });
@@ -983,7 +982,7 @@ export function graficoCheia(canvasId, serie, limites = {}) {
   const rotuloLimites = limites.rotuloLimites || '';
   const pontos = amostrar(serie);
   const c = cores();
-  const escuro = temaEscuro.matches;
+  const escuro = temaEscuroAtivo();
   const { nivelMaximo, nivelMinimo, limiteSemDano } = limites;
 
   const opcoes = opcoesBase({ titulo: '', tituloEixoY: '', pontos, legenda: false });
@@ -1202,6 +1201,18 @@ export function graficoCheia(canvasId, serie, limites = {}) {
       { nome: `Limites ${rotuloLimites}`, cor: cinza, faixa: true });
     opcoes.plugins.paineis.lista[1].series.push(
       { nome: `Limites ${rotuloLimites}`, cor: cinza, faixa: true });
+  }
+
+  // Leitor de tela não enxerga canvas: o gráfico se descreve em uma frase,
+  // com as mesmas três leituras que os rótulos de pico destacam.
+  const canvas = document.getElementById(canvasId);
+  if (canvas) {
+    const maximo = (campo) => pontos.reduce((m, p) => (Number.isFinite(p[campo]) && p[campo] > m ? p[campo] : m), -Infinity);
+    const f = (v, casas) => (Number.isFinite(v) ? v.toLocaleString('pt-BR', { minimumFractionDigits: casas, maximumFractionDigits: casas }) : '—');
+    canvas.setAttribute('role', 'img');
+    canvas.setAttribute('aria-label',
+      `Gráfico da cheia: nível máximo ${f(maximo('cota'), 2)} m, afluência de pico ${f(maximo('qaf'), 0)} m³/s, `
+      + `vertimento máximo ${f(maximo('qvert'), 0)} m³/s e bombeamento máximo ${f(maximo('qbomb'), 0)} m³/s.`);
   }
 
   return criarGrafico(canvasId, {
