@@ -77,9 +77,20 @@ export function bombeamentoNaCota(conjuntos, cota) {
 function retiradaPossivel(conjuntos, cota, limite, minimos = null) {
   const prontos = conjuntosNaCota(conjuntos, cota);
   const piso = prontos.map((c) => Math.min(c.unidades, minimos ? minimos[c.indice] || 0 : 0));
+  // Ordem de prioridade da operação: primeiro o bombeamento de Vigário; a
+  // reversão de Santa Cecília só entra com Vigário inteiro ligado (todas as
+  // unidades disponíveis na cota). Sem Vigário em condição de operar — cota
+  // abaixo da captação ou nenhuma unidade disponível —, a reversão é o único
+  // recurso e pode rodar sozinha.
+  const ordemRespeitada = (ligadas) => {
+    const reversaoLigada = prontos.some((c, i) => c.tipo === 'reversao' && ligadas[i] > 0);
+    if (!reversaoLigada) return true;
+    return prontos.every((c, i) => c.tipo === 'reversao' || ligadas[i] === c.unidades);
+  };
   let melhor = null;
   const buscar = (i, total, ligadas) => {
     if (i === prontos.length) {
+      if (!ordemRespeitada(ligadas)) return;
       if (!melhor || total > melhor.total + 1e-9) melhor = { total, ligadas: [...ligadas] };
       return;
     }
@@ -284,13 +295,30 @@ function repartirSaida({
     const melhor = retiradaPossivel(conjuntos, cota, teto);
     if (melhor && melhor.total < retirada.total - 1e-9) retirada = melhor;
   }
-  const qb = retirada.total;
+  let qb = retirada.total;
   let qv = Math.min(vertProgramado, Math.max(0, saidaMax - qb));
+  const saidaMin = Number.isFinite(volumeTeto) ? (volume - volumeTeto) / HM3_POR_M3S + qaf : -Infinity;
+
+  // O vertimento é o último recurso. Se a comporta vai passar água neste
+  // passo — pela rampa programada ou porque o teto obriga —, antes dela
+  // entra tudo o que as máquinas podem tirar: Vigário inteiro, depois Santa
+  // Cecília. A água que as bombas assumem sai do vertimento, não se soma a
+  // ele; a defluência total fica a mesma, salvo o arredondamento de máquina.
+  // A regra de sustentação não segura as bombas aqui: ela existe para não
+  // esvaziar o reservatório perto do piso, e com a comporta aberta essa
+  // água sairia de qualquer jeito.
+  if (qv > 1e-9 || saidaMin > qb + 1e-9) {
+    const cheia = retiradaPossivel(conjuntos, cota, saidaMax, retirada.unidades);
+    if (cheia && cheia.total > qb + 1e-9) {
+      qv = Math.max(0, qv - (cheia.total - qb));
+      retirada = cheia;
+      qb = cheia.total;
+    }
+  }
   const contido = qb < disponivelBomba - 1e-9 || qv < vertProgramado - 1e-9;
 
   let forcado = 0;
   if (Number.isFinite(volumeTeto)) {
-    const saidaMin = (volume - volumeTeto) / HM3_POR_M3S + qaf;
     const alvo = Math.min(Math.max(saidaMin - qb, 0), saidaMax, capacidadeMax);
     if (alvo > qv + 1e-9) {
       forcado = alvo - qv;
@@ -301,7 +329,8 @@ function repartirSaida({
   // ligada neste passo, pelas regras de operação, ficou parada enquanto a
   // comporta passava água. Registrado aqui, onde as regras estão, e não
   // recalculado depois contra uma combinação ideal que a operação não faria.
-  const maquinaOciosa = qv > 1e-9 && !!subindo && subindo.total > qb + 1e-9;
+  const possivel = retiradaPossivel(conjuntos, cota, saidaMax);
+  const maquinaOciosa = qv > 1e-9 && !!possivel && possivel.total > qb + 1e-9;
   return {
     qb, qv, contido, forcado, retirada, maquinaOciosa,
     bombeamento: retirada.bombeamento, reversao: retirada.reversao,
@@ -382,8 +411,15 @@ function simularCom(cav, hidrograma, volumeInicial, conjuntos, vertimento, volum
           // Math.max tira o zero NEGATIVO: com manterNivel em zero,
           // Math.ceil(-1e-9) devolve -0, e -0 vezes o degrau continua -0 —
           // o cronograma imprimia "Fechar para -0,00 m3/s".
-          const alvoFecho = Math.max(0, Number.isFinite(degrau)
-            ? Math.ceil(manterNivel / degrau - 1e-9) * degrau : manterNivel);
+          //
+          // Sobra menor que um degrau não justifica comporta aberta: a
+          // comporta fecha e o reservatório guarda esse resto. Sem isso, no
+          // fim da cheia com o nível no piso e nenhuma bomba cabendo, ela
+          // ficava em 10 m³/s vertendo os 4 m³/s que chegavam. Se o nível
+          // estiver no teto, a regra do teto verte o necessário do mesmo jeito.
+          const alvoFecho = Number.isFinite(degrau)
+            ? (manterNivel < degrau - 1e-9 ? 0 : Math.max(0, Math.ceil(manterNivel / degrau - 1e-9) * degrau))
+            : manterNivel;
           if (alvoFecho < paraDescer) { paraDescer = alvoFecho; fechaDireto = true; }
           // O teto também vale para a abertura: sem ele o envelope, que
           // desce devagar, reabria a comporta no passo seguinte e o comando
