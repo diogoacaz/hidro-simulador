@@ -130,13 +130,24 @@ export async function render(container) {
     // Cada reservatório tem sua faixa de cota, e elas podem nem se sobrepor.
     // Um nível herdado da seleção anterior fica fora da CAV nova e impediria a
     // simulação, então só se preserva o que ainda couber na faixa.
+    //
+    // Sem valor que caiba, o padrão é um deplecionamento típico: do máximo ao
+    // mínimo operacional do cadastro (ou de 3/4 a 1/4 da faixa da CAV). Os
+    // dois no meio da faixa davam nível inicial igual ao alvo, e o modo
+    // padrão, calcular tempo, recusava a simulação.
+    const r = estado.reservatorio;
+    const dentro = (x) => Number.isFinite(x) && x >= l.cotaMin && x <= l.cotaMax;
+    const padrao = {
+      nivelInicial: dentro(r.nivelMaxOperacional) ? r.nivelMaxOperacional : l.cotaMin + 0.75 * (l.cotaMax - l.cotaMin),
+      nivelFinal: dentro(r.nivelMinOperacional) ? r.nivelMinOperacional : l.cotaMin + 0.25 * (l.cotaMax - l.cotaMin),
+    };
     for (const campo of ['nivelInicial', 'nivelFinal']) {
       const input = $(`#${campo}`, container);
       input.min = l.cotaMin;
       input.max = l.cotaMax;
       const atual = valorNumerico(input);
       const cabe = atual != null && atual >= l.cotaMin - 1e-9 && atual <= l.cotaMax + 1e-9;
-      if (!cabe) input.value = ((l.cotaMin + l.cotaMax) / 2).toFixed(2);
+      if (!cabe) input.value = Number(padrao[campo]).toFixed(2);
     }
   };
 
