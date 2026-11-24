@@ -647,6 +647,108 @@ export function propostaDePatamar(cfg, reservaM = 0.1) {
   return r;
 }
 
+/**
+ * Simulação a partir de uma tabela editada pelo usuário.
+ *
+ * As propostas automáticas decidem a comporta e as bombas; aqui quem decide
+ * é o operador. Cada passo de 15 min traz a afluência, o bombeamento, a
+ * reversão e o vertimento que ele quer testar, e o motor só refaz o balanço
+ * hídrico — nível e volume são consequência, nunca entrada.
+ *
+ * A física continua valendo, nas mesmas regras das propostas:
+ * - No PISO a retirada cede: não se tira água que não existe acima dele.
+ *   Corta primeiro o vertimento, depois a reversão, por último o
+ *   bombeamento — a mesma ordem de prioridade do resto do app.
+ * - No TETO a defluência iguala a afluência: o que faltar sai pela
+ *   comporta, limitado à capacidade do vertedouro, e fica marcado como
+ *   manobra imposta pelo teto.
+ * O degrau de manobra não é aplicado: o vertimento digitado é a decisão do
+ * operador, e é ela que se quer testar.
+ */
+export function simularEditado(cfg, edicao) {
+  const { cav, nivelInicial, nivelMaximo, nivelMinimo = null, conjuntos = [], vertedouro = {}, dataInicial = new Date() } = cfg;
+  const capacidadeMax = Math.max(0, Number(vertedouro.capacidadeMax) || 0);
+  const limiteSemDano = Number(vertedouro.limiteSemDano);
+  const degrau = Math.max(0.0001, Number(vertedouro.degrau) || 0.0001);
+
+  const { volumeMin: volumeMinCav, volumeMax: volumeMaxCav } = limitesCav(cav);
+  const volumeTeto = Math.min(volumeDaCota(cav, nivelMaximo), volumeMaxCav);
+  const volumePiso = Number.isFinite(nivelMinimo)
+    ? Math.max(volumeDaCota(cav, nivelMinimo), volumeMinCav)
+    : volumeMinCav;
+
+  const hidrograma = edicao.qaf.map((q) => Math.max(0, Number(q) || 0));
+  const n = hidrograma.length;
+  const volumes = new Array(n + 1);
+  const bombeado = new Array(n);
+  const revertido = new Array(n);
+  const vertido = new Array(n);
+  const comandado = new Array(n);
+  const reduzido = new Array(n).fill(false);
+  const forcado = new Array(n).fill(0);
+  volumes[0] = volumeDaCota(cav, nivelInicial);
+
+  for (let t = 0; t < n; t++) {
+    const v = volumes[t];
+    const qaf = hidrograma[t];
+    let qb = Math.max(0, Number(edicao.qbomb[t]) || 0);
+    let qr = Math.max(0, Number(edicao.qrev[t]) || 0);
+    let qv = Math.min(capacidadeMax, Math.max(0, Number(edicao.qvert[t]) || 0));
+    // O que o operador mandou abrir. Se o piso cortar a água, o cronograma
+    // continua mostrando o comando, não a vazão que conseguiu passar — senão
+    // um vertimento fixo virava uma manobra a cada passo.
+    const pedido = qv;
+
+    // Piso: a retirada pedida não pode levar o volume abaixo dele.
+    const saidaMax = Math.max(0, (v - volumePiso) / HM3_POR_M3S + qaf);
+    let excesso = qb + qr + qv - saidaMax;
+    if (excesso > 1e-9) {
+      reduzido[t] = true;
+      const corte = (q) => { const c = Math.min(q, excesso); excesso -= c; return q - c; };
+      qv = corte(qv);
+      qr = corte(qr);
+      qb = corte(qb);
+    }
+
+    // Teto: o que não cabe sai pela comporta, até a capacidade.
+    const saidaMin = (v - volumeTeto) / HM3_POR_M3S + qaf;
+    if (qb + qr + qv < saidaMin - 1e-9) {
+      const alvo = Math.min(capacidadeMax, Math.max(0, saidaMin - qb - qr));
+      if (alvo > qv + 1e-9) { forcado[t] = alvo - qv; qv = alvo; }
+    }
+
+    bombeado[t] = qb;
+    revertido[t] = qr;
+    vertido[t] = qv;
+    // Imposta pelo teto, a abertura forçada vira o comando — é o que se
+    // executa na comporta.
+    comandado[t] = forcado[t] > 0 ? qv : pedido;
+    volumes[t + 1] = v + (qaf - qb - qr - qv) * HM3_POR_M3S;
+  }
+
+  const estado = {
+    volumes, bombeado, revertido, vertido, comandado, reduzido, forcado,
+    barrado: new Array(n).fill(false),
+    ociosa: new Array(n).fill(false),
+  };
+  const r = montar({
+    cav, hidrograma, vertimento: vertido, programado: comandado, estado, dataInicial,
+    necessario: new Array(n).fill(0), rampaInsuficiente: false, portoes: {},
+    nivelMaximo, nivelMinimo, limiteSemDano, capacidadeMax, degrau,
+    // Passo a passo: a edição pode mudar a comporta em qualquer passo, e o
+    // cronograma não pode esconder as mudanças fora da grade de manobra.
+    passosPorDegrau: 1, conjuntos,
+  });
+  r.resumo.manual = true;
+  r.resumo.passosReduzidos = reduzido.filter(Boolean).length;
+  // O que foi digitado, para a tabela reabrir com os valores do usuário e
+  // não com os que a física deixou passar.
+  r.edicao = {
+    qaf: [...edicao.qaf], qbomb: [...edicao.qbomb], qrev: [...edicao.qrev], qvert: [...edicao.qvert],
+  };
+  return r;
+}
+
 function amortecerUm(cfg) {
   const {
     cav,

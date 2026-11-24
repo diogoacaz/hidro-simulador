@@ -1012,6 +1012,83 @@ a { color: inherit; text-decoration: none; }
   font-variant-numeric: tabular-nums;
 }
 
+/* ---------- Passo a passo editável ---------- */
+
+.barra-edicao {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 14px 0 12px;
+}
+
+.barra-edicao-status { font-size: 0.8rem; color: var(--texto-suave); }
+
+.passo-a-passo { max-height: 520px; }
+
+.passo-a-passo table { border-collapse: separate; border-spacing: 0; }
+
+/* Cabeçalho fixo: com 230 linhas, rolar sem saber qual coluna é qual não serve. */
+.passo-a-passo thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--superficie);
+  vertical-align: bottom;
+}
+
+.passo-a-passo thead th small {
+  display: block;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--texto-suave);
+}
+
+.passo-a-passo td { padding-top: 3px; padding-bottom: 3px; }
+
+.passo-hora {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--texto-medio);
+}
+
+.passo-a-passo .cel {
+  width: 88px;
+  min-height: 0;
+  padding: 4px 8px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.84rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--raio-p);
+}
+
+.passo-a-passo .cel:hover { border-color: var(--linha-forte); }
+.passo-a-passo .cel:focus { background: var(--superficie); border-color: var(--acento-tinta); outline: none; }
+.passo-a-passo .cel.editada { background: var(--acento-suave); border-color: var(--acento-tinta); font-weight: 600; }
+.passo-a-passo .cel.invalida { border-color: var(--critico); color: var(--critico); }
+
+.passo-a-passo tr.corrigida td { background: var(--sutil); }
+
+.passo-marcas { white-space: nowrap; }
+
+.marca-teto,
+.marca-piso {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+/* Teto: o balanço teve de verter mais do que foi digitado. Piso: teve de
+   tirar menos. As duas marcas dizem onde a física corrigiu a edição. */
+.marca-teto { background: color-mix(in srgb, var(--critico) 14%, transparent); color: var(--critico); }
+.marca-piso { background: color-mix(in srgb, var(--atencao) 16%, transparent); color: var(--atencao); }
+
 /* ---------- As duas propostas de vertimento ---------- */
 
 .propostas {
@@ -1024,6 +1101,10 @@ a { color: inherit; text-decoration: none; }
    mínimo, e com o texto do cartão isso estourava a largura da página. */
 @media (min-width: 820px) {
   .propostas { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (min-width: 1100px) {
+  .propostas.tres { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 .proposta {
@@ -1232,6 +1313,7 @@ a { color: inherit; text-decoration: none; }
   .painel:has(#form-cheia),
   .painel:has(.propostas),
   .painel:has(.cenarios),
+  .passo-a-passo-painel,
   .topo,
   .rodape,
   #form-cheia,

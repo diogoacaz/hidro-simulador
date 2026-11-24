@@ -8,10 +8,10 @@
 
 import * as db from '../db.js';
 import { limitesCav, volumeDaCota } from '../cav.js';
-import { amortecerCheia, propostaDePatamar, hidrogramaCheia, cenariosDeBombeamento, cronogramaDeManobras, custoDoAtraso } from '../cheia.js';
+import { amortecerCheia, propostaDePatamar, simularEditado, hidrogramaCheia, cenariosDeBombeamento, cronogramaDeManobras, custoDoAtraso } from '../cheia.js';
 import { graficoCheia } from '../charts.js';
 import { $, $$, esc, num, toast, comBotao, valorNumerico, paraInputDateTime } from '../ui.js';
-import { lerListaNumeros, baixarCsv } from '../planilha.js';
+import { lerListaNumeros, baixarCsv, paraNumero } from '../planilha.js';
 
 // As duas retiradas de Santana. Vigário bombeia para o sistema; Santa
 // Cecília reverte para o Paraíba do Sul. Operações distintas, por isso o
@@ -325,6 +325,7 @@ export async function render(container) {
         patamar: propostaDePatamar(cfg, reserva),
       };
       estado.cfgAtual = cfg;
+      estado.origem = null;
       // O menor pico é a proposta padrão: é a que serve ao objetivo do
       // simulador. A de último recurso fica ao lado, para comparar.
       estado.escolha = estado.propostas.patamar ? 'patamar' : 'recurso';
@@ -336,12 +337,69 @@ export async function render(container) {
   });
 
   $('#saida', container).addEventListener('click', (e) => {
+    if (e.target.closest('#btn-resimular')) { resimular(); return; }
+    if (e.target.closest('#btn-desfazer')) {
+      pintarEscolha(container, estado);
+      return;
+    }
     const botao = e.target.closest('[data-proposta]');
     if (!botao || botao.dataset.proposta === estado.escolha) return;
     estado.escolha = botao.dataset.proposta;
     pintarEscolha(container, estado);
     $('#saida', container).scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
+
+  // Edição na tabela passo a passo.
+  $('#saida', container).addEventListener('focusin', (e) => {
+    if (!e.target.classList.contains('cel')) return;
+    // A referência para "o que mudou" é a tabela como ela abriu.
+    if (!estado.origem) {
+      estado.origem = {
+        qaf: [...estado.edicao.qaf], qbomb: [...estado.edicao.qbomb],
+        qrev: [...estado.edicao.qrev], qvert: [...estado.edicao.qvert],
+      };
+    }
+  });
+  $('#saida', container).addEventListener('change', (e) => {
+    if (!e.target.classList.contains('cel')) return;
+    lerCelula(e.target, estado);
+    atualizarBarraEdicao(container, estado);
+  });
+  // Colar uma coluna do Excel numa célula preenche os passos seguintes.
+  $('#saida', container).addEventListener('paste', (e) => {
+    const alvo = e.target;
+    if (!alvo.classList || !alvo.classList.contains('cel')) return;
+    const texto = (e.clipboardData || window.clipboardData).getData('text');
+    const valores = texto.split(/\r?\n/).map((l) => l.split('\t')[0].trim()).filter((l) => l !== '');
+    if (valores.length < 2) return;
+    e.preventDefault();
+    const campo = alvo.dataset.campo;
+    let t = Number(alvo.dataset.t);
+    for (const v of valores) {
+      const cel = $(`#passo-a-passo .cel[data-t="${t}"][data-campo="${campo}"]`, container);
+      if (!cel) break;
+      if (!estado.origem) {
+        estado.origem = {
+          qaf: [...estado.edicao.qaf], qbomb: [...estado.edicao.qbomb],
+          qrev: [...estado.edicao.qrev], qvert: [...estado.edicao.qvert],
+        };
+      }
+      cel.value = v;
+      lerCelula(cel, estado);
+      t += 1;
+    }
+    atualizarBarraEdicao(container, estado);
+    toast(`${valores.length} valores colados a partir desta linha.`);
+  });
+
+  function resimular() {
+    if ($$('#passo-a-passo .cel.invalida', container).length) return;
+    estado.propostas.editada = simularEditado(estado.cfgAtual, estado.edicao);
+    estado.escolha = 'editada';
+    estado.origem = null;
+    pintarEscolha(container, estado);
+    $('#saida', container).scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 }
 
 // Linha compacta: o que muda a cada evento é quantas unidades estão de pé.
@@ -444,6 +502,32 @@ function pintarEscolha(container, estado) {
   const r = propostas[escolha] || propostas.recurso;
   $('#saida', container).innerHTML = htmlPropostas(propostas, escolha) + htmlSaida(r, cfgAtual);
   desenhar(r, cfgAtual);
+  // A tabela passo a passo parte do resultado que está na tela. Numa edição
+  // já simulada, reabre com o que o usuário digitou — não com o que o piso
+  // ou o teto deixaram passar.
+  estado.edicao = r.edicao
+    ? { qaf: [...r.edicao.qaf], qbomb: [...r.edicao.qbomb], qrev: [...r.edicao.qrev], qvert: [...r.edicao.qvert] }
+    : edicaoDoResultado(r);
+  estado.editados = new Set();
+  // Referência do que mudou: a tabela como ela abriu.
+  estado.origem = {
+    qaf: [...estado.edicao.qaf], qbomb: [...estado.edicao.qbomb],
+    qrev: [...estado.edicao.qrev], qvert: [...estado.edicao.qvert],
+  };
+  $('#passo-a-passo', container).innerHTML = tabelaPassoAPasso(r, estado.edicao);
+  atualizarBarraEdicao(container, estado);
+}
+
+// Valores de entrada de cada passo, tirados de um resultado. O vertimento é o
+// COMANDADO na comporta: é o que se reaplica para reproduzir a proposta.
+function edicaoDoResultado(r) {
+  const passos = r.serie.slice(0, -1);
+  return {
+    qaf: passos.map((p) => p.qaf),
+    qbomb: passos.map((p) => p.qbomb),
+    qrev: passos.map((p) => p.qrev),
+    qvert: passos.map((p) => p.qvertProgramado),
+  };
 }
 
 const PROPOSTAS = {
@@ -454,6 +538,10 @@ const PROPOSTAS = {
   patamar: {
     nome: 'Menor pico possível',
     resumo: 'Abre cedo e mantém constante, usando o reservatório para achatar a onda. Verte mais volume e por mais tempo, com um pico bem menor.',
+  },
+  editada: {
+    nome: 'Sua edição',
+    resumo: 'Os valores que você digitou na tabela passo a passo, refeitos no balanço hídrico com os limites de piso e teto.',
   },
 };
 
@@ -488,12 +576,12 @@ function htmlPropostas(propostas, escolha) {
   return `
     <section class="painel">
       <div class="cabecalho-painel">
-        <div><h2>Duas propostas para esta cheia</h2>
+        <div><h2>${propostas.editada ? 'Propostas para esta cheia' : 'Duas propostas para esta cheia'}</h2>
           <p class="ajuda">Pico e duração se opõem: o volume a passar é quase o mesmo, então
           baixar o pico significa verter por mais tempo. Escolha e o resto da tela acompanha.</p>
         </div>
       </div>
-      <div class="propostas">${cartao('patamar')}${cartao('recurso')}</div>
+      <div class="propostas${propostas.editada ? ' tres' : ''}">${cartao('patamar')}${cartao('recurso')}${cartao('editada')}</div>
     </section>`;
 }
 
@@ -590,7 +678,9 @@ function htmlSaida({ resumo }, cfg) {
     item('Volume bombeado', `${num(resumo.volumeBombeado, 2)} hm³`),
     item('Volume revertido', `${num(resumo.volumeRevertido, 2)} hm³`),
     item('Retirada na cota', `${num(resumo.bombeamentoMinimo)} a ${num(resumo.bombeamentoMaximo)} m³/s`),
-    item('Manobras', `${resumo.manobras} de ${num(resumo.degrau)} m³/s a cada ${resumo.minutosPorDegrau} min`),
+    item('Manobras', resumo.manual
+      ? `${resumo.manobras} definidas na edição`
+      : `${resumo.manobras} de ${num(resumo.degrau)} m³/s a cada ${resumo.minutosPorDegrau} min`),
     resumo.antecedenciaMin != null
       ? item('Abertura × bombas no limite',
         resumo.antecedenciaMin > 0
@@ -622,7 +712,25 @@ function htmlSaida({ resumo }, cfg) {
       </details>
     </section>
 
-    <section class="painel">
+    <section class="painel passo-a-passo-painel">
+      <div class="cabecalho-painel">
+        <div><h2>Passo a passo</h2>
+          <p class="ajuda">Cada variável de 15 em 15 min. Edite afluência, bombeamento, reversão ou
+          vertimento e simule de novo: nível e volume são recalculados. O piso e o teto de
+          emergência continuam valendo — se a edição pedir água que não existe ou deixar o nível
+          passar do teto, o balanço corrige e a linha fica marcada. Para preencher vários passos de
+          uma vez, cole uma coluna do Excel numa célula.</p>
+        </div>
+      </div>
+      <div class="barra-edicao">
+        <button type="button" class="primario" id="btn-resimular" disabled>Simular novamente</button>
+        <button type="button" id="btn-desfazer" disabled>Desfazer edições</button>
+        <span class="barra-edicao-status" id="status-edicao">Nenhuma edição.</span>
+      </div>
+      <div id="passo-a-passo"></div>
+    </section>
+
+    ${resumo.manual ? '' : `<section class="painel">
       <h2>E se…</h2>
       <p class="ajuda">As três incertezas reais da operação, medidas sobre esta mesma cheia.</p>
       <div class="cenarios">
@@ -639,7 +747,66 @@ function htmlSaida({ resumo }, cfg) {
           <div id="cenarios-nivel"></div>
         </details>
       </div>
-    </section>`;
+    </section>`}`;
+}
+
+// A tabela editável. Hora, as quatro vazões que o operador controla ou
+// prevê, e o que resulta delas — cota e volume, só leitura.
+const CAMPOS_EDITAVEIS = ['qaf', 'qbomb', 'qrev', 'qvert'];
+const fmtCelula = (v) => (Number.isFinite(v) ? v.toFixed(2).replace('.', ',') : '');
+
+function tabelaPassoAPasso(r, edicao) {
+  const linhas = r.serie.slice(0, -1).map((p, t) => {
+    const marcas = [
+      p.qvertForcado > 1e-9 ? '<span class="marca-teto">teto</span>' : '',
+      // Nas propostas automáticas "retirada reduzida" é operação normal no
+      // piso (bomba parada por falta de água); só numa edição ela quer dizer
+      // que o valor digitado foi cortado.
+      r.resumo.manual && p.retiradaReduzida ? '<span class="marca-piso">piso</span>' : '',
+    ].join('');
+    const cel = (campo) => `<td><input type="text" inputmode="decimal" class="cel" data-t="${t}"
+      data-campo="${campo}" value="${fmtCelula(edicao[campo][t])}" aria-label="${campo} no passo ${t + 1}" /></td>`;
+    return `<tr${marcas ? ' class="corrigida"' : ''}>
+      <td class="passo-hora">${esc(hora(p.dataHora))}</td>
+      ${CAMPOS_EDITAVEIS.map(cel).join('')}
+      <td class="num">${num(r.serie[t + 1].cota)}</td>
+      <td class="num">${num(r.serie[t + 1].volume, 3)}</td>
+      <td class="passo-marcas">${marcas}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="tabela-scroll passo-a-passo"><table>
+    <thead><tr><th>Quando</th>
+      <th class="num">Afluência<small>m³/s</small></th><th class="num">Bombeado<small>m³/s</small></th>
+      <th class="num">Revertido<small>m³/s</small></th><th class="num">Vertido<small>m³/s</small></th>
+      <th class="num">Cota ao fim<small>m</small></th><th class="num">Volume ao fim<small>hm³</small></th>
+      <th></th></tr></thead>
+    <tbody>${linhas}</tbody></table></div>`;
+}
+
+function atualizarBarraEdicao(container, estado) {
+  const n = estado.editados ? estado.editados.size : 0;
+  const invalidas = $$('#passo-a-passo .cel.invalida', container).length;
+  $('#btn-resimular', container).disabled = n === 0 || invalidas > 0;
+  $('#btn-desfazer', container).disabled = n === 0;
+  $('#status-edicao', container).textContent = invalidas
+    ? `${invalidas} ${invalidas === 1 ? 'célula inválida' : 'células inválidas'} — corrija antes de simular.`
+    : n ? `${n} ${n === 1 ? 'valor editado' : 'valores editados'}.` : 'Nenhuma edição.';
+}
+
+// Lê uma célula. Vazio ou negativo não serve: a tabela é de vazões.
+function lerCelula(input, estado) {
+  const v = paraNumero(input.value);
+  const t = Number(input.dataset.t);
+  const campo = input.dataset.campo;
+  const valido = Number.isFinite(v) && v >= 0;
+  input.classList.toggle('invalida', !valido);
+  if (!valido) return;
+  const original = estado.origem ? estado.origem[campo][t] : null;
+  estado.edicao[campo][t] = v;
+  const chave = `${campo}:${t}`;
+  const mudou = original == null || Math.abs(v - original) > 1e-9;
+  input.classList.toggle('editada', mudou);
+  if (mudou) estado.editados.add(chave); else estado.editados.delete(chave);
 }
 
 function grupo(titulo, itens) {
@@ -668,8 +835,12 @@ function desenhar(resultado, cfg) {
     rotuloLimites: resumo.limites ? `± ${num(resumo.limites.percentual, 0)}%` : '',
   });
 
-  $('#cenarios-bombas').innerHTML = tabelaBombas(cenariosDeBombeamento(cfg, 0), cfg);
-  $('#cenarios-nivel').innerHTML = tabelaNivel(cfg);
+  // Os cenários medem as propostas automáticas; numa edição manual eles
+  // descreveriam outra operação, então o painel nem é desenhado.
+  if (!resumo.manual) {
+    $('#cenarios-bombas').innerHTML = tabelaBombas(cenariosDeBombeamento(cfg, 0), cfg);
+    $('#cenarios-nivel').innerHTML = tabelaNivel(cfg);
+  }
 
   const cronograma = cronogramaDeManobras(resultado);
   $('#cronograma').innerHTML = tabelaCronograma(cronograma);
@@ -690,11 +861,15 @@ function desenhar(resultado, cfg) {
     : '';
   // A primeira manobra saiu daqui: ela agora é a primeira linha da lista
   // logo abaixo, e repetir só empurrava a lista para baixo.
-  $('#cronograma-resumo').innerHTML = cronograma.length
-    ? `<strong>${cronograma.length} manobras</strong> de ${num(resumo.degrau)} m³/s a cada
-       ${resumo.minutosPorDegrau} min, entre ${hora(cronograma[0].dataHora)} e
-       ${hora(cronograma[cronograma.length - 1].dataHora)}.`
-    : 'A comporta permanece fechada durante todo o evento.';
+  $('#cronograma-resumo').innerHTML = !cronograma.length
+    ? 'A comporta permanece fechada durante todo o evento.'
+    : resumo.manual
+      ? `<strong>${cronograma.length} manobras</strong> definidas na sua edição, entre
+         ${hora(cronograma[0].dataHora)} e ${hora(cronograma[cronograma.length - 1].dataHora)}.`
+      : `<strong>${cronograma.length} manobras</strong> de ${num(resumo.degrau)} m³/s a cada
+         ${resumo.minutosPorDegrau} min, entre ${hora(cronograma[0].dataHora)} e
+         ${hora(cronograma[cronograma.length - 1].dataHora)}.`;
+  if (resumo.manual) { exportar(cfg, serie, cronograma); return; }
   const atraso = custoDoAtraso(cfg);
   $('#atraso').innerHTML = tabelaAtraso(atraso, resumo);
   // Mesmo critério da tabela: a folga acaba quando o nível encosta no teto e
@@ -706,6 +881,10 @@ function desenhar(resultado, cfg) {
       ? 'qualquer atraso leva o nível ao teto'
       : 'nem no horário a comporta fica dentro do degrau';
 
+  exportar(cfg, serie, cronograma);
+}
+
+function exportar(cfg, serie, cronograma) {
   const nome = (cfg.reservatorio?.nome || 'cheia').replace(/\W+/g, '-').toLowerCase();
   $('#btn-exportar-cronograma').onclick = () => baixarCsv(`manobras-${nome}.csv`,
     ['Data/hora', 'Abertura alvo (m³/s)', 'Variação (m³/s)', 'Cota (m)', 'Afluência (m³/s)', 'Acima do limite'],
@@ -713,9 +892,9 @@ function desenhar(resultado, cfg) {
       m.cota.toFixed(2), m.qaf.toFixed(1), m.acimaDoLimite ? 'sim' : 'não']));
 
   $('#btn-exportar-serie').onclick = () => baixarCsv(`cheia-${nome}.csv`,
-    ['Passo', 'Data/hora', 'Afluente (m³/s)', 'Bombeado (m³/s)', 'Vertido (m³/s)',
-      'Retirada total (m³/s)', 'Volume (hm³)', 'Cota (m)'],
-    serie.map((p) => [p.passo, hora(p.dataHora), p.qaf.toFixed(2), p.qbomb.toFixed(2),
+    ['Passo', 'Data/hora', 'Afluente (m³/s)', 'Bombeado (m³/s)', 'Revertido (m³/s)', 'Vertido (m³/s)',
+      'Defluência total (m³/s)', 'Volume (hm³)', 'Cota (m)'],
+    serie.map((p) => [p.passo, hora(p.dataHora), p.qaf.toFixed(2), p.qbomb.toFixed(2), p.qrev.toFixed(2),
       p.qvert.toFixed(2), p.qsaida.toFixed(2), p.volume.toFixed(4), p.cota.toFixed(3)]));
 }
 
