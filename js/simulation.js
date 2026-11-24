@@ -320,6 +320,12 @@ export function simular(cfgEntrada) {
     const r = resolverTempo({ ...cfg, dataInicial });
     if (!r.alcancado) {
       alertas.push(r.alerta);
+      // A manchete precisa dizer que a resposta é "não atinge" — sem isto ela
+      // mostrava o nível final como se fosse o resultado pedido.
+      incognita = {
+        variavel: MODOS.TEMPO, valor: null, unidade: 'min', texto: 'Não atinge',
+        naoAtinge: true, nivelInicial: cfg.nivelInicial, nivelFinal: cfg.nivelFinal,
+      };
       // A busca varre até um ano, mas a trajetória exibida fica em 30 dias
       // para não gerar dezenas de milhares de pontos inúteis.
       passos = Math.min(r.passos, 2880);

@@ -112,6 +112,12 @@ function hero(incognita, resumo) {
         + `${esc(instante.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }))} de `
         + `${esc(instante.toLocaleDateString('pt-BR'))}`,
     ]
+    : incognita?.naoAtinge
+    ? [
+      'Tempo até o alvo',
+      incognita.texto,
+      `o nível não chega de ${num(incognita.nivelInicial)} m a ${num(incognita.nivelFinal)} m — veja o motivo abaixo`,
+    ]
     : incognita
     ? [
       `${ROTULOS_MODO[incognita.variavel]} — incógnita`,
