@@ -1,14 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img"
-     aria-label="Simulador Hidráulico — onda de cheia sobre a água">
-  <defs><clipPath id="c"><rect width="64" height="64" rx="15"/></clipPath></defs>
+     aria-label="Simulador Hidráulico — onda de cheia">
+  <defs>
+    <clipPath id="c"><rect width="64" height="64" rx="15"/></clipPath>
+    <linearGradient id="f" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#c3ff24" stop-opacity=".55"/>
+      <stop offset="1" stop-color="#c3ff24" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
   <g clip-path="url(#c)">
-    <rect width="64" height="64" fill="#c3ff24"/>
-    <g fill="none" stroke="#14332d" stroke-linecap="round" stroke-linejoin="round">
-      <!-- a onda de cheia: sobe rápido, desce longa, sem voltar à base -->
-      <path d="M10.5 32.5 C15 32.5 17.5 14 24.5 14 C31 14 33 23.5 39 26 C44 28 49 27 53.5 25" stroke-width="5.4"/>
-      <!-- a água que fica: duas linhas paralelas, de período inteiro -->
-      <path d="M10.5 41.5 Q16 37 21.5 41.5 T32.5 41.5 T43.5 41.5 T53.5 41.5" stroke-width="4.2"/>
-      <path d="M10.5 50.5 Q16 46 21.5 50.5 T32.5 50.5 T43.5 50.5 T53.5 50.5" stroke-width="3.8"/>
-    </g>
+    <rect width="64" height="64" fill="#14332d"/>
+    <!-- o hidrograma da cheia: subida rápida, recessão longa -->
+    <path d="M0 48 C8 48 13 19 24 19 C34 19 38 36 48 40 C55 42.5 59 43 64 43 V64 H0 Z" fill="url(#f)"/>
+    <path d="M0 48 C8 48 13 19 24 19 C34 19 38 36 48 40 C55 42.5 59 43 64 43" fill="none"
+          stroke="#c3ff24" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"/>
   </g>
 </svg>

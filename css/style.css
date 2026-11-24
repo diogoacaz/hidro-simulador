@@ -118,7 +118,8 @@ body {
   /* Mesma curvatura do ícone (15 em 64). */
   border-radius: 23.5%;
   overflow: hidden;
-  background: var(--acento);
+  /* O ícone traz o próprio fundo; sem isto sobrava um fio lima nos cantos. */
+  background: none;
   display: grid;
   place-items: center;
   color: var(--sobre-acento);
