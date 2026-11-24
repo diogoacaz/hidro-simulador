@@ -103,7 +103,16 @@ export function preencher(raiz, { resultado, reservatorio, limites, restricoes, 
 // A manchete: a incógnita que a simulação resolveu. Sem incógnita (modo de
 // previsão direta), o nível final é o que o operador foi buscar.
 function hero(incognita, resumo) {
-  const [rotulo, valor, apoio] = incognita
+  const instante = incognita?.instante ? new Date(incognita.instante) : null;
+  const [rotulo, valor, apoio] = instante
+    ? [
+      'Tempo até o alvo',
+      incognita.texto,
+      `de ${num(incognita.nivelInicial)} m a ${num(incognita.nivelFinal)} m · atinge às `
+        + `${esc(instante.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }))} de `
+        + `${esc(instante.toLocaleDateString('pt-BR'))}`,
+    ]
+    : incognita
     ? [
       `${ROTULOS_MODO[incognita.variavel]} — incógnita`,
       incognita.texto,

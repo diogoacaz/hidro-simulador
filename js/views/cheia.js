@@ -11,7 +11,7 @@ import { limitesCav, volumeDaCota } from '../cav.js';
 import { amortecerCheia, propostaDePatamar, simularEditado, hidrogramaCheia, cenariosDeBombeamento, cronogramaDeManobras, custoDoAtraso } from '../cheia.js';
 import { graficoCheia } from '../charts.js';
 import { $, $$, esc, num, toast, comBotao, valorNumerico, paraInputDateTime, proximoQuartoDeHora } from '../ui.js';
-import { baixarCsv, paraNumero } from '../planilha.js';
+import { baixarCsv, paraNumero, lerSerieEstrita } from '../planilha.js';
 
 // As duas retiradas de Santana. Vigário bombeia para o sistema; Santa
 // Cecília reverte para o Paraíba do Sul. Operações distintas, por isso o
@@ -456,29 +456,6 @@ function lerConjuntos(container) {
       tipo: bloco.dataset.tipo,
     };
   });
-}
-
-// Lê a série medida sem descartar nada em silêncio. A leitura tolerante
-// pulava o que não fosse número, e cada valor pulado adiantava em 15 min
-// toda a série seguinte — e com ela a hora de abrir a comporta.
-function lerSerieEstrita(texto) {
-  const valores = [];
-  const invalidos = [];
-  for (const token of String(texto ?? '').split(/[\s;]+/).filter(Boolean)) {
-    const direto = paraNumero(token);
-    if (Number.isFinite(direto)) { valores.push(direto); continue; }
-    // "350,400,420": lista separada por vírgulas. Vírgula sobrando no fim
-    // ("350,") não é valor.
-    for (const parte of token.split(',').filter((p) => p.trim() !== '')) {
-      const v = paraNumero(parte);
-      if (Number.isFinite(v)) valores.push(v); else invalidos.push(parte);
-    }
-  }
-  if (invalidos.length) {
-    const exemplos = invalidos.slice(0, 3).map((v) => `"${v}"`).join(', ');
-    throw new Error(`A série medida tem ${invalidos.length} valor${invalidos.length > 1 ? 'es' : ''} que não ${invalidos.length > 1 ? 'são números' : 'é número'} (${exemplos}). Corrija antes de simular: um valor pulado desloca toda a série em 15 min.`);
-  }
-  return valores;
 }
 
 function montarConfig(container, estado) {

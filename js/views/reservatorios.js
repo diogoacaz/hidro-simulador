@@ -365,13 +365,16 @@ async function renderDetalhe(container, id) {
       else if (colado) matriz = textoParaMatriz(colado);
       else throw new Error('Selecione um arquivo ou cole os dados da tabela.');
 
-      const pontos = removerCabecalho(matriz)
-        .map((linha) => ({
-          cota: paraNumero(linha[0]),
-          area: paraNumero(linha[1]),
-          volume: paraNumero(linha[2]),
-        }))
-        .filter((p) => Number.isFinite(p.cota) && Number.isFinite(p.volume));
+      const linhas = removerCabecalho(matriz).filter((l) => l.some((c) => String(c ?? '').trim() !== ''));
+      const lidos = linhas.map((linha) => ({
+        cota: paraNumero(linha[0]),
+        area: paraNumero(linha[1]),
+        volume: paraNumero(linha[2]),
+      }));
+      // Linha sem os três números não entra — e quantas foram ignoradas é
+      // dito, para ninguém importar meia tabela sem saber.
+      const pontos = lidos.filter((p) => Number.isFinite(p.cota) && Number.isFinite(p.area) && Number.isFinite(p.volume));
+      const ignoradas = lidos.length - pontos.length;
 
       if (pontos.length < 2) throw new Error('Não foi possível ler ao menos 2 pontos válidos. Confira a ordem das colunas: cota, área, volume.');
 
@@ -385,7 +388,8 @@ async function renderDetalhe(container, id) {
       });
 
       const aviso = avisoTamanho(nova.pontos);
-      toast(aviso || `Tabela CAV salva: ${nova.pontos} pontos de 1 cm.`, aviso ? 'info' : 'ok');
+      const nota = ignoradas ? ` ${ignoradas} linha(s) sem cota, área e volume numéricos foram ignoradas.` : '';
+      toast((aviso || `Tabela CAV salva: ${nova.pontos} pontos de 1 cm.`) + nota, aviso || ignoradas ? 'info' : 'ok');
       await renderDetalhe(container, id);
     }, 'Processando…');
   });

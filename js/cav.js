@@ -37,6 +37,10 @@ export function construirCav(pontos) {
     }
   }
 
+  const negativo = unicos.find((p) => p.area < 0 || p.volume < 0);
+  if (negativo) throw new Error(`Área ou volume negativo na cota ${negativo.cota}. Verifique a planilha.`);
+  conferirUnidades(unicos);
+
   for (let i = 1; i < unicos.length; i++) {
     if (unicos[i].volume < unicos[i - 1].volume) {
       throw new Error(
@@ -71,6 +75,42 @@ export function construirCav(pontos) {
   }
 
   return { cotaInicial, passo: PASSO_COTA, areas, volumes, pontos: n };
+}
+
+/**
+ * Confere se volume e área estão nas unidades do app (hm³ e km²).
+ *
+ * Física simples: subir Δh metros com espelho de A km² acrescenta A·Δh hm³.
+ * Então, entre dois pontos da tabela, ΔV/Δh tem de dar aproximadamente a
+ * área média. Numa tabela com volume em m³ a razão dá um milhão; com área em
+ * hectares, um centésimo. Sem esta conferência a tabela seria aceita e todos
+ * os tempos e níveis do simulador sairiam errados pelo mesmo fator.
+ */
+export function razaoVolumeArea(pontos) {
+  const razoes = [];
+  for (let i = 1; i < pontos.length; i++) {
+    const dh = pontos[i].cota - pontos[i - 1].cota;
+    const am = (pontos[i].area + pontos[i - 1].area) / 2;
+    if (dh > 0 && am > 0) razoes.push((pontos[i].volume - pontos[i - 1].volume) / dh / am);
+  }
+  if (!razoes.length) return null;
+  razoes.sort((a, b) => a - b);
+  return razoes[Math.floor(razoes.length / 2)];
+}
+
+function conferirUnidades(pontos) {
+  const r = razaoVolumeArea(pontos);
+  if (r == null || (r >= 0.3 && r <= 3)) return;
+  const perto = (x) => r > x / 3 && r < x * 3;
+  const palpite = perto(1e6) ? ' O volume parece estar em m³: divida por 1.000.000 para hm³.'
+    : perto(1e3) ? ' O volume parece estar em mil m³: divida por 1.000 para hm³.'
+      : perto(1e-6) ? ' A área parece estar em m²: divida por 1.000.000 para km².'
+        : perto(1e-2) ? ' A área parece estar em hectares: divida por 100 para km².'
+          : perto(1e2) ? ' A área parece estar em centenas de km², ou o volume em 10⁴ m³.'
+            : '';
+  const fator = r >= 1 ? `${Math.round(r).toLocaleString('pt-BR')} vezes` : `1/${Math.round(1 / r).toLocaleString('pt-BR')}`;
+  throw new Error(`As unidades da tabela não batem: a variação de volume por metro de cota dá ${fator} a área. `
+    + `O app espera volume em hm³ (milhões de m³) e área em km².${palpite}`);
 }
 
 export function limitesCav(cav) {

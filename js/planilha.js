@@ -151,6 +151,29 @@ export function lerListaNumeros(texto) {
     .filter(Number.isFinite);
 }
 
+// Lê a série medida sem descartar nada em silêncio. A leitura tolerante
+// pulava o que não fosse número, e cada valor pulado adiantava em 15 min
+// toda a série seguinte — e com ela a hora de abrir a comporta.
+export function lerSerieEstrita(texto, nome = 'série medida') {
+  const valores = [];
+  const invalidos = [];
+  for (const token of String(texto ?? '').split(/[\s;]+/).filter(Boolean)) {
+    const direto = paraNumero(token);
+    if (Number.isFinite(direto)) { valores.push(direto); continue; }
+    // "350,400,420": lista separada por vírgulas. Vírgula sobrando no fim
+    // ("350,") não é valor.
+    for (const parte of token.split(',').filter((p) => p.trim() !== '')) {
+      const v = paraNumero(parte);
+      if (Number.isFinite(v)) valores.push(v); else invalidos.push(parte);
+    }
+  }
+  if (invalidos.length) {
+    const exemplos = invalidos.slice(0, 3).map((v) => `"${v}"`).join(', ');
+    throw new Error(`A ${nome} tem ${invalidos.length} valor${invalidos.length > 1 ? 'es' : ''} que não ${invalidos.length > 1 ? 'são números' : 'é número'} (${exemplos}). Corrija antes de simular: um valor pulado desloca toda a série em 15 min.`);
+  }
+  return valores;
+}
+
 // Descarta a primeira linha se ela parecer um cabeçalho (nenhuma célula numérica).
 export function removerCabecalho(matriz) {
   if (!matriz.length) return matriz;

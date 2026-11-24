@@ -116,15 +116,20 @@ function severidadeMaxima(violacoes) {
  * Integra o balanço hídrico a partir de um volume inicial.
  * Retorna a série completa de 15 em 15 min (inclui o instante t=0).
  */
-function integrar({ cav, volumeInicial, qaf, qdef, passos, dataInicial, limites, restricoes }) {
+function integrar({ cav, volumeInicial, qaf, qdef, passos, dataInicial, limites, restricoes, conter = { min: true, max: true }, fracaoFinal = 1 }) {
   const serie = [];
   const { volumeMin, volumeMax, cotaMin, cotaMax } = limitesCav(cav);
 
   // Os limites de emergência viram volume uma vez só: o balanço corre em
   // volume, e é nele que a contenção precisa agir.
-  const vMaxEmerg = Number.isFinite(limites.nivelMaxEmergencial)
+  //
+  // No cálculo de TEMPO até um alvo além de um limite de emergência, a
+  // contenção daquele lado é desligada: o usuário perguntou quando o nível
+  // chega lá, e segurá-lo no limite faria o gráfico parar antes do alvo cujo
+  // tempo a manchete anuncia. A violação continua marcada como crítica.
+  const vMaxEmerg = conter.max && Number.isFinite(limites.nivelMaxEmergencial)
     ? volumeDaCota(cav, limites.nivelMaxEmergencial) : null;
-  const vMinEmerg = Number.isFinite(limites.nivelMinEmergencial)
+  const vMinEmerg = conter.min && Number.isFinite(limites.nivelMinEmergencial)
     ? volumeDaCota(cav, limites.nivelMinEmergencial) : null;
 
   let volume = volumeInicial;
@@ -132,8 +137,14 @@ function integrar({ cav, volumeInicial, qaf, qdef, passos, dataInicial, limites,
   let contido = null;   // marcação herdada do passo anterior
   let semFolgaMin = false;
 
+  // Instante do ponto i. Com `fracaoFinal` < 1 o último passo é parcial: no
+  // cálculo de tempo a trajetória termina no instante exato em que o nível
+  // cruza o alvo, e não no fim do passo de 15 min — senão a manchete dizia
+  // 5 h 30 min e o resumo, 5 h 45 min e um nível já além do alvo.
+  const minutosNo = (i) => (i < passos ? i * 15 : (passos - 1 + fracaoFinal) * 15);
   for (let i = 0; i <= passos; i++) {
-    const dataHora = new Date(dataInicial.getTime() + i * PASSO_SEGUNDOS * 1000);
+    const dataHora = new Date(dataInicial.getTime() + minutosNo(i) * 60000);
+    const dt = (i === passos - 1 ? fracaoFinal : 1) * HM3_POR_M3S;
     const cota = cotaDoVolume(cav, volume);
     const ativas = restricoesAtivas(restricoes, dataHora);
     const violacoes = violacoesNaCota(cota, limites, ativas);
@@ -154,18 +165,18 @@ function integrar({ cav, volumeInicial, qaf, qdef, passos, dataInicial, limites,
     contido = null;
 
     if (i < passos) {
-      let bruto = volume + (qafPasso - qdefInformada) * HM3_POR_M3S;
+      let bruto = volume + (qafPasso - qdefInformada) * dt;
 
       if (vMaxEmerg !== null && bruto > vMaxEmerg + 1e-12) {
         // Segurar o nível no máximo emergencial exige verter o excesso.
-        qdefEfetiva = qdefInformada + (bruto - vMaxEmerg) / HM3_POR_M3S;
+        qdefEfetiva = qdefInformada + (bruto - vMaxEmerg) / dt;
         bruto = vMaxEmerg;
       } else if (vMinEmerg !== null && bruto < vMinEmerg - 1e-12) {
         // Segurar o nível no mínimo exige liberar menos — e não existe
         // defluência negativa. Sem folga, o nível cai mesmo assim.
-        const reducao = (vMinEmerg - bruto) / HM3_POR_M3S;
+        const reducao = (vMinEmerg - bruto) / dt;
         qdefEfetiva = Math.max(0, qdefInformada - reducao);
-        bruto = volume + (qafPasso - qdefEfetiva) * HM3_POR_M3S;
+        bruto = volume + (qafPasso - qdefEfetiva) * dt;
         // Zerar a defluência é o máximo que se pode fazer. Só há queda real se
         // o nível ainda ficar abaixo do limite depois disso — o que acontece
         // quando já se partiu de baixo dele.
@@ -189,7 +200,7 @@ function integrar({ cav, volumeInicial, qaf, qdef, passos, dataInicial, limites,
     serie.push({
       passo: i,
       dataHora: dataHora.toISOString(),
-      minutos: i * 15,
+      minutos: minutosNo(i),
       qaf: qafPasso,
       qdef: qdefEfetiva,
       qdefInformada,
@@ -222,7 +233,7 @@ function resolverTempo(cfg) {
   const { cav, nivelInicial, nivelFinal, qaf, qdef } = cfg;
   const vAlvo = volumeDaCota(cav, nivelFinal);
   const { volumeMin, volumeMax } = limitesCav(cav);
-  const maxPassos = Math.min(
+  let maxPassos = Math.min(
     cfg.maxPassos || MAX_PASSOS_BUSCA,
     Math.max(passosDisponiveis(qaf), passosDisponiveis(qdef)) === Infinity
       ? MAX_PASSOS_BUSCA
@@ -234,7 +245,17 @@ function resolverTempo(cfg) {
   let passosAteAlvo = null;
   let fracao = 0;
 
+  const fimDasSeries = Math.max(
+    passosDisponiveis(qaf) === Infinity ? 0 : passosDisponiveis(qaf),
+    passosDisponiveis(qdef) === Infinity ? 0 : passosDisponiveis(qdef),
+  );
   for (let i = 0; i < maxPassos; i++) {
+    // Depois do fim das séries as vazões não mudam mais: se o saldo leva para
+    // longe do alvo, varrer um ano inteiro não muda a resposta.
+    if (i >= fimDasSeries) {
+      const saldo = vazaoNoPasso(qaf, i) - vazaoNoPasso(qdef, i);
+      if (subindo ? saldo <= 1e-9 : saldo >= -1e-9) { maxPassos = Math.min(maxPassos, Math.max(i, 96)); break; }
+    }
     const anterior = volume;
     volume += (vazaoNoPasso(qaf, i) - vazaoNoPasso(qdef, i)) * HM3_POR_M3S;
     volume = Math.min(Math.max(volume, volumeMin), volumeMax);
@@ -249,11 +270,18 @@ function resolverTempo(cfg) {
   }
 
   if (passosAteAlvo === null) {
-    return {
-      alcancado: false,
-      passos: maxPassos,
-      alerta: `O nível alvo de ${fmt(nivelFinal)} m não é atingido em até ${fmt(maxPassos / 4, 0)} h com as vazões informadas.`,
-    };
+    // Com as vazões do fim (a série acabou ou são constantes), o saldo diz se
+    // o nível ainda caminha para o alvo. Se não caminha, o motivo é esse — e
+    // não a falta de tempo.
+    const fimAf = vazaoNoPasso(qaf, maxPassos - 1);
+    const fimDef = vazaoNoPasso(qdef, maxPassos - 1);
+    const saldo = fimAf - fimDef;
+    const vaiAoAlvo = subindo ? saldo > 1e-9 : saldo < -1e-9;
+    const motivo = vaiAoAlvo
+      ? `não é atingido em até ${fmt(maxPassos / 4, 0)} h com as vazões informadas`
+      : `nunca é atingido: com ${fmt(fimAf)} m³/s entrando e ${fmt(fimDef)} m³/s saindo, o nível ${
+        Math.abs(saldo) <= 1e-9 ? 'fica parado' : subindo ? 'desce' : 'sobe'}`;
+    return { alcancado: false, passos: maxPassos, alerta: `O nível alvo de ${fmt(nivelFinal)} m ${motivo}.` };
   }
   return { alcancado: true, passosFracionarios: passosAteAlvo, passos: Math.ceil(passosAteAlvo) };
 }
@@ -264,7 +292,8 @@ function resolverTempo(cfg) {
  * Executa a simulação resolvendo a incógnita escolhida.
  * @returns {{serie, incognita, resumo, alertas}}
  */
-export function simular(cfg) {
+export function simular(cfgEntrada) {
+  let cfg = cfgEntrada;
   const {
     cav, modo, limites = {}, restricoes = [],
     dataInicial = new Date(),
@@ -278,6 +307,16 @@ export function simular(cfg) {
   let incognita = null;
 
   if (modo === MODOS.TEMPO) {
+    // Alvo além de um limite de emergência: o nível tem de poder chegar lá.
+    const minE = limites.nivelMinEmergencial;
+    const maxE = limites.nivelMaxEmergencial;
+    const conter = {
+      min: !(Number.isFinite(minE) && cfg.nivelFinal < minE - 1e-9),
+      max: !(Number.isFinite(maxE) && cfg.nivelFinal > maxE + 1e-9),
+    };
+    if (!conter.min) alertas.push(`O alvo de ${fmt(cfg.nivelFinal)} m está abaixo do mínimo emergencial de ${fmt(minE)} m. O cálculo deixa o nível passar dele para responder quando o alvo é atingido; o trecho abaixo do mínimo aparece como violação crítica.`);
+    if (!conter.max) alertas.push(`O alvo de ${fmt(cfg.nivelFinal)} m está acima do máximo emergencial de ${fmt(maxE)} m. O cálculo deixa o nível passar dele para responder quando o alvo é atingido; o trecho acima do máximo aparece como violação crítica.`);
+    cfg = { ...cfg, conter };
     const r = resolverTempo({ ...cfg, dataInicial });
     if (!r.alcancado) {
       alertas.push(r.alerta);
@@ -287,11 +326,18 @@ export function simular(cfg) {
     } else {
       passos = Math.max(1, r.passos);
       const minutos = r.passosFracionarios * 15;
+      // Fração do último passo até o cruzamento (1 = passo inteiro).
+      const fr = r.passosFracionarios - (passos - 1);
+      cfg = { ...cfg, fracaoFinal: fr > 1e-9 && fr < 1 ? fr : 1 };
       incognita = {
         variavel: MODOS.TEMPO,
         valor: minutos,
         unidade: 'min',
         texto: formatarDuracao(minutos),
+        // Instante em que o nível cruza o alvo, para a manchete dizer quando.
+        instante: new Date(dataInicial.getTime() + minutos * 60000).toISOString(),
+        nivelInicial: cfg.nivelInicial,
+        nivelFinal: cfg.nivelFinal,
       };
     }
   } else if (modo === MODOS.QAF) {
@@ -304,6 +350,7 @@ export function simular(cfg) {
       alertas.push(`A afluência equivalente resultou negativa (${fmt(qafEq)} m³/s): o cenário informado é fisicamente inviável.`);
     }
     incognita = { variavel: MODOS.QAF, valor: qafEq, unidade: 'm³/s', texto: `${fmt(qafEq)} m³/s (constante equivalente)` };
+    avisosDeSerie(cfg, passos, alertas);
     return montarResultado({ ...cfg, qaf: { tipo: 'constante', valor: qafEq }, passos, dataInicial }, incognita, alertas);
   } else if (modo === MODOS.QDEF) {
     const v0 = volumeDaCota(cav, cfg.nivelInicial);
@@ -314,6 +361,7 @@ export function simular(cfg) {
       alertas.push(`A defluência equivalente resultou negativa (${fmt(qdefEq)} m³/s): não é possível atingir o nível alvo apenas liberando água.`);
     }
     incognita = { variavel: MODOS.QDEF, valor: qdefEq, unidade: 'm³/s', texto: `${fmt(qdefEq)} m³/s (constante equivalente)` };
+    avisosDeSerie(cfg, passos, alertas);
     return montarResultado({ ...cfg, qdef: { tipo: 'constante', valor: qdefEq }, passos, dataInicial }, incognita, alertas);
   } else if (modo === MODOS.NIVEL_INICIAL) {
     const vf = volumeDaCota(cav, cfg.nivelFinal);
@@ -329,6 +377,7 @@ export function simular(cfg) {
     incognita = { variavel: MODOS.NIVEL_INICIAL, valor: nivelInicial, unidade: 'm', texto: `${fmt(nivelInicial)} m` };
   }
 
+  avisosDeSerie(cfg, passos, alertas);
   const resultado = montarResultado({ ...cfg, nivelInicial, passos, dataInicial }, incognita, alertas);
 
   if (modo === MODOS.NIVEL_FINAL) {
@@ -343,6 +392,21 @@ export function simular(cfg) {
   return resultado;
 }
 
+// Série que não cobre o período calculado: o motor mantém o último valor (ou
+// usa só o começo dela). As duas coisas mudam o resultado e precisam ser ditas.
+function avisosDeSerie(cfg, passos, alertas) {
+  for (const [spec, nome] of [[cfg.qaf, 'afluência'], [cfg.qdef, 'defluência']]) {
+    if (!spec || spec.tipo !== 'serie' || !spec.serie?.length) continue;
+    const n = spec.serie.length;
+    if (n < passos) {
+      alertas.push(`A série de ${nome} cobre ${formatarDuracao(n * 15)}, menos que o período calculado (${formatarDuracao(passos * 15)}): `
+        + `daí em diante foi mantido o último valor, ${fmt(spec.serie[n - 1])} m³/s.`);
+    } else if (n > passos) {
+      alertas.push(`A série de ${nome} tem ${formatarDuracao(n * 15)}; foi usado só o trecho inicial, de ${formatarDuracao(passos * 15)}.`);
+    }
+  }
+}
+
 function montarResultado(cfg, incognita, alertas) {
   const { cav, limites = {}, restricoes = [], dataInicial, passos } = cfg;
   const volumeInicial = volumeDaCota(cav, cfg.nivelInicial);
@@ -355,6 +419,8 @@ function montarResultado(cfg, incognita, alertas) {
     dataInicial,
     limites,
     restricoes,
+    conter: cfg.conter,
+    fracaoFinal: cfg.fracaoFinal ?? 1,
   });
 
   if (saiuDaCav) {
@@ -391,10 +457,11 @@ function montarResultado(cfg, incognita, alertas) {
   const ultimo = serie[serie.length - 1];
   const passosViolados = serie.filter((s) => s.violacoes.length);
 
+  const duracaoMin = ultimo.minutos;
   const resumo = {
     passos,
-    duracaoMin: passos * 15,
-    duracaoTexto: formatarDuracao(passos * 15),
+    duracaoMin,
+    duracaoTexto: formatarDuracao(duracaoMin),
     inicio: primeiro.dataHora,
     fim: ultimo.dataHora,
     cotaInicial: primeiro.cota,

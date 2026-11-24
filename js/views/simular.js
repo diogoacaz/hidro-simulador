@@ -4,7 +4,7 @@
 import * as db from '../db.js';
 import { limitesCav } from '../cav.js';
 import { simular, MODOS, ROTULOS_MODO, formatarDuracao } from '../simulation.js';
-import { lerArquivo, extrairSerie, lerListaNumeros } from '../planilha.js';
+import { lerArquivo, extrairSerie, lerSerieEstrita } from '../planilha.js';
 import { $, $$, esc, num, toast, comBotao, valorNumerico, paraInputDateTime, proximoQuartoDeHora } from '../ui.js';
 import * as resultadoView from './resultado.js';
 
@@ -60,8 +60,8 @@ export async function render(container) {
           </label>
           <label>Modo de cálculo
             <select id="modo">
+              <option value="${MODOS.TEMPO}" selected>Calcular tempo (deplecionamento)</option>
               <option value="${MODOS.NIVEL_FINAL}">Calcular nível final</option>
-              <option value="${MODOS.TEMPO}">Calcular tempo</option>
               <option value="${MODOS.QAF}">Calcular vazão afluente</option>
               <option value="${MODOS.QDEF}">Calcular vazão defluente</option>
               <option value="${MODOS.NIVEL_INICIAL}">Calcular nível inicial</option>
@@ -189,8 +189,16 @@ export async function render(container) {
   }
 
   const atualizarInfoSerie = (chave, bloco, origem = '') => {
-    const valores = lerSerie($(`#${chave}-serie`, bloco).value);
     const info = $(`#${chave}-info`, bloco);
+    let valores;
+    try {
+      valores = lerSerie($(`#${chave}-serie`, bloco).value, chave);
+      info.classList.remove('erro');
+    } catch (err) {
+      info.classList.add('erro');
+      info.textContent = err.message;
+      return;
+    }
     if (!valores.length) { info.textContent = ''; return; }
     let min = Infinity; let max = -Infinity; let soma = 0;
     for (const v of valores) { if (v < min) min = v; if (v > max) max = v; soma += v; }
@@ -313,7 +321,13 @@ function montarConfig(container, estado) {
   if (necessarios.includes('duracao')) {
     const valor = Number($('#duracao', container).value);
     if (!Number.isFinite(valor) || valor <= 0) throw new Error('Informe uma duração positiva.');
-    cfg.passos = Math.max(1, Math.round(valor * UNIDADES[$('#duracao-unidade', container).value]));
+    // A duração vira passos de 15 min. Arredondar em silêncio mudava o
+    // período: 20 min viravam 15, 1,1 h viravam 1 h.
+    const passosExatos = valor * UNIDADES[$('#duracao-unidade', container).value];
+    if (Math.abs(passosExatos - Math.round(passosExatos)) > 1e-6 || Math.round(passosExatos) < 1) {
+      throw new Error(`A duração precisa ser múltipla de 15 min (o passo do cálculo); ${num(valor)} ${$('#duracao-unidade', container).selectedOptions[0].textContent} não é.`);
+    }
+    cfg.passos = Math.round(passosExatos);
   }
 
   if (modo === MODOS.TEMPO && cfg.nivelInicial === cfg.nivelFinal) {
@@ -335,15 +349,15 @@ function lerEspecificacaoVazao(container, chave) {
     return { tipo: 'constante', valor };
   }
 
-  const serie = lerSerie($(`#${chave}-serie`, bloco).value);
+  const serie = lerSerie($(`#${chave}-serie`, bloco).value, chave);
   if (!serie.length) throw new Error(`Informe a série de vazão ${rotulo} (um valor a cada 15 min).`);
   if (serie.some((v) => v < 0)) throw new Error(`A série de vazão ${rotulo} tem valores negativos.`);
   return { tipo: 'serie', serie };
 }
 
-// A textarea é relida aqui na hora de simular, então uma vírgula tratada como
-// separador duplicaria cada valor pt-BR ("12,5" viraria 12 e 5).
-const lerSerie = (texto) => lerListaNumeros(texto);
+// A textarea é relida aqui na hora de simular. Leitura estrita: um valor que
+// não é número vira erro, em vez de sumir e adiantar o resto da série 15 min.
+const lerSerie = (texto, chave) => lerSerieEstrita(texto, `série de vazão ${chave === 'qaf' ? 'afluente' : 'defluente'}`);
 
 function blocoVazao(chave, rotulo) {
   return `
