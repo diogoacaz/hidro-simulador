@@ -8,6 +8,7 @@ import * as viewUsinas from './views/usinas.js';
 import * as viewReservatorios from './views/reservatorios.js';
 import * as viewRegistros from './views/registros.js';
 import * as viewHistorico from './views/historico.js';
+import * as viewChatbot from './views/chatbot.js';
 import { destruirTodos } from './charts.js';
 import { iniciarTema } from './tema.js';
 
@@ -20,6 +21,7 @@ const ROTAS = {
   reservatorios: viewReservatorios,
   registros: viewRegistros,
   historico: viewHistorico,
+  chatbot: viewChatbot,
 };
 
 const ROTA_PADRAO = 'simular';
@@ -30,10 +32,17 @@ function rotaAtual() {
   return { nome: ROTAS[nome] ? nome : ROTA_PADRAO, param: param || null };
 }
 
+// A página que está na tela; ao sair, ela libera o que tiver de vivo (o
+// robô 3D, por exemplo, tem laço de animação e memória de vídeo).
+let paginaAtual = null;
+
 async function navegar() {
   const { nome, param } = rotaAtual();
   const container = $('#conteudo');
 
+  try { paginaAtual?.desmontar?.(); } catch (err) { console.warn(err); }
+  paginaAtual = ROTAS[nome];
+  document.body.dataset.rota = nome;
   destruirTodos();
   $$('#navegacao a').forEach((a) => a.classList.toggle('ativa', a.dataset.rota === nome));
   carregando(container);

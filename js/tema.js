@@ -22,6 +22,7 @@ export function temaEscuroAtivo() {
 /** Registra uma função chamada sempre que o tema efetivo muda. */
 export function aoMudarTema(fn) {
   ouvintes.add(fn);
+  return () => ouvintes.delete(fn);
 }
 
 function avisar() {
