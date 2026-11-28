@@ -1530,11 +1530,15 @@ a { color: inherit; text-decoration: none; }
    barra superior, sem margens nem rodapé: a página dela tem fundo e layout
    próprios. O corpo vira coluna para o iframe pegar a altura que sobra, com
    a barra de qualquer altura (no celular ela quebra em duas linhas). */
-body[data-rota="chatbot"] { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; background: #030814; }
+body[data-rota="chatbot"] { --chatbot-fundo: #e4eff8; display: flex; flex-direction: column; height: 100dvh; overflow: hidden; background: var(--chatbot-fundo); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) body[data-rota="chatbot"] { --chatbot-fundo: #030814; }
+}
+:root[data-theme="dark"] body[data-rota="chatbot"] { --chatbot-fundo: #030814; }
 body[data-rota="chatbot"] .conteudo { flex: 1 1 auto; min-height: 0; max-width: none; width: 100%; padding: 0; }
 body[data-rota="chatbot"] .rodape { display: none; }
 
-.chatbot-quadro { display: block; width: 100%; height: 100%; border: 0; background: #030814; }
+.chatbot-quadro { display: block; width: 100%; height: 100%; border: 0; background: var(--chatbot-fundo); }
 
 @media print {
   .chatbot-quadro { display: none; }

@@ -9,7 +9,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
-export function criarRobo(container, { modelo, aoCarregar, aoProgresso, enquadre = { y: 0.04, dist: 2.55, alvoX: 0 }, grade = false } = {}) {
+export function criarRobo(container, { modelo, aoCarregar, aoProgresso, enquadre = { y: 0.04, dist: 2.55, alvoX: 0 }, grade = false, claro = false } = {}) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -54,6 +54,24 @@ export function criarRobo(container, { modelo, aoCarregar, aoProgresso, enquadre
   const ft = new THREE.CanvasTexture(fc); ft.colorSpace = THREE.SRGBColorSpace;
   cena.background = ft; cena.backgroundIntensity = 1;
 
+  // fundo do tema claro: azul-gelo com um clarão branco no centro, manchas azul e verde nos cantos e curvas
+  // brancas largas e desfocadas. Pintado aqui (e não em CSS atrás de um canvas transparente) porque o bloom
+  // não preserva a transparência.
+  const fcc = document.createElement('canvas'); fcc.width = 1600; fcc.height = 900;
+  const c = fcc.getContext('2d');
+  let gc = c.createLinearGradient(0, 0, 1600, 900); gc.addColorStop(0, '#eaf3fb'); gc.addColorStop(1, '#d5e6f4');
+  c.fillStyle = gc; c.fillRect(0, 0, 1600, 900);
+  c.filter = 'blur(40px)';
+  for (const [x, y, r, cor] of [[800, 380, 640, 'rgba(255,255,255,.9)'], [110, 150, 420, 'rgba(160,208,240,.55)'], [1530, 820, 420, 'rgba(178,232,214,.5)']]) {
+    gc = c.createRadialGradient(x, y, 0, x, y, r); gc.addColorStop(0, cor); gc.addColorStop(1, 'rgba(255,255,255,0)');
+    c.fillStyle = gc; c.fillRect(x - r, y - r, 2 * r, 2 * r);
+  }
+  c.filter = 'blur(9px)'; c.lineWidth = 34;
+  for (const [x, y, r, a] of [[260, 540, 540, 0.7], [1420, 250, 470, 0.6], [1120, 1060, 640, 0.5]]) {
+    c.strokeStyle = `rgba(255,255,255,${a})`; c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.stroke();
+  }
+  const ftClaro = new THREE.CanvasTexture(fcc); ftClaro.colorSpace = THREE.SRGBColorSpace;
+
   // o anel ciano atrás da cabeça (aberto embaixo, como na BOT-008)
   const halo = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.0032, 8, 240, Math.PI * 2 * (280 / 360)),
     new THREE.MeshBasicMaterial({ color: new THREE.Color(0x29d9ff).multiplyScalar(2.2), toneMapped: false, transparent: true, opacity: 0.95 }));
@@ -62,7 +80,7 @@ export function criarRobo(container, { modelo, aoCarregar, aoProgresso, enquadre
   cena.add(halo);
 
   // luz: chave quente-neutra de frente, contraluz ciano e verde nos lados (como na imagem)
-  cena.add(new THREE.HemisphereLight(0xdfefff, 0x0a1830, 0.55));
+  const hemi = new THREE.HemisphereLight(0xdfefff, 0x0a1830, 0.55); cena.add(hemi);
   const chave = new THREE.DirectionalLight(0xffffff, 1.2); chave.position.set(0.6, 1.0, 2.2); cena.add(chave);
   const ciano = new THREE.PointLight(0x2fd8ff, 2.2, 4); ciano.position.set(-1.1, 0.4, -0.4); cena.add(ciano);
   const verde = new THREE.PointLight(0x7dff4a, 1.4, 4); verde.position.set(1.1, 0.2, -0.4); cena.add(verde);
@@ -142,6 +160,18 @@ export function criarRobo(container, { modelo, aoCarregar, aoProgresso, enquadre
     falar(ligado) { falaAlvo = ligado ? 1 : 0; },
     fixar(nx, ny, ms = 1600) { fixo = { yaw: nx * 0.34, pitch: ny * 0.22, ate: performance.now() + ms }; },
     pulsar() { pulso = 1; },
+    // tema claro: fundo azul-gelo, sem o anel e com a luz ambiente mais aberta; escuro: como na BOT-008
+    tema(ehClaro) {
+      cena.background = ehClaro ? ftClaro : ft;
+      bloom.threshold = ehClaro ? 1.05 : 0.92;  // no claro o fundo chega perto de 1: só os LEDs (acima de 1) brilham
+      halo.visible = !ehClaro;
+      hemi.color.set(ehClaro ? 0xf2f8ff : 0xdfefff); hemi.groundColor.set(ehClaro ? 0x9fb8cc : 0x0a1830);
+      hemi.intensity = ehClaro ? 0.7 : 0.55;
+      cena.environmentIntensity = ehClaro ? 0.5 : 0.45;
+      // o ajuste de tons vale para a cena inteira, fundo incluído: o ACES acinzenta o azul-gelo, o Neutral o mantém
+      renderer.toneMapping = ehClaro ? THREE.NeutralToneMapping : THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = ehClaro ? 1.0 : 0.9;
+    },
     U, bloom, renderer, halo, camera,
   };
 
@@ -177,5 +207,6 @@ export function criarRobo(container, { modelo, aoCarregar, aoProgresso, enquadre
     halo.scale.setScalar(1 + pulso * 0.04 + falando * Math.sin(t * 6) * 0.006);
     composer.render(dt);
   });
+  api.tema(claro);
   return api;
 }

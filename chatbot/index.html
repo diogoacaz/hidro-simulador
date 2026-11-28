@@ -4,6 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Assistente de Operação · Light Energia</title>
+<script>
+  // Tema: dentro do Simulador Hidráulico segue o botão claro/escuro do app (a escolha gravada no <html> dele);
+  // aberta sozinha, segue o sistema. Aplicado já aqui, antes do primeiro desenho, para não piscar.
+  (function () {
+    var t = null;
+    try { if (parent !== window) t = parent.document.documentElement.dataset.theme || null; } catch (e) {}
+    var escuro = t === 'dark' || (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+    document.documentElement.dataset.tema = escuro ? 'escuro' : 'claro';
+  })();
+</script>
 <style>
   /* Inter servida pelo próprio app (sem Google Fonts: funciona na rede interna e sem internet) */
   @font-face { font-family: Inter; font-style: normal; font-weight: 100 900; font-display: swap;
@@ -115,6 +125,59 @@
 
   #carga { position: fixed; left: 50%; top: 50%; translate: -50% -50%; font: 500 13px Inter; letter-spacing: .1em; color: #7fdcff; transition: opacity .6s; }
 
+  /* ---------- tema claro: vidro branco sobre azul-gelo, ícones em ciano e verde ---------- */
+  html[data-tema=claro] {
+    --ciano: #0aa9dc; --verde: #1fbf55; --ambar: #b7791f;
+    --vidro: rgba(255, 255, 255, .42); --vidro-2: rgba(255, 255, 255, .72); --borda: rgba(255, 255, 255, .95);
+    --texto: #10243a; --suave: #5d7189;
+  }
+  html[data-tema=claro], html[data-tema=claro] body { background: #e4eff8; }
+  html[data-tema=claro] #palco3d {
+    background:
+      radial-gradient(42% 55% at 50% 42%, rgba(255,255,255,.95), rgba(255,255,255,0) 70%),
+      radial-gradient(38% 60% at 6% 18%, rgba(160,208,240,.55), rgba(160,208,240,0) 70%),
+      radial-gradient(36% 50% at 96% 88%, rgba(178,232,214,.5), rgba(178,232,214,0) 70%),
+      linear-gradient(160deg, #eaf3fb, #d7e8f5);
+  }  /* aparece só enquanto a robô carrega: depois o 3D pinta o mesmo fundo */
+  html[data-tema=claro] .vidro { backdrop-filter: blur(18px) saturate(160%); -webkit-backdrop-filter: blur(18px) saturate(160%);
+    box-shadow: inset 0 1px 0 #fff, 0 12px 36px rgba(70, 120, 170, .14), 0 1px 2px rgba(70, 120, 170, .08); }
+  html[data-tema=claro] .acao .ic { width: 4.6cqw; height: 4.6cqw; border-radius: 1.1cqw; flex: none; color: var(--ciano);
+    background: rgba(255,255,255,.8); box-shadow: 0 .3cqw 1cqw rgba(70,120,170,.12); }
+  html[data-tema=claro] .acoes li:nth-child(2n) .acao .ic { color: var(--verde); }
+  html[data-tema=claro] .acao .seta { color: var(--texto); }
+  html[data-tema=claro] .acao::after { background: radial-gradient(18cqw 8cqw at var(--mx, 50%) var(--my, 50%), rgba(10,169,220,.12), transparent 70%); }
+  html[data-tema=claro] .acao:hover { border-color: rgba(10,169,220,.55); box-shadow: 0 0 1.6cqw rgba(10,169,220,.18), inset 0 1px 0 #fff; }
+  html[data-tema=claro] .acao:hover .ic { color: var(--ciano); filter: none; }
+  html[data-tema=claro] .acao[aria-pressed=true] { border-color: rgba(31,191,85,.6);
+    background: linear-gradient(160deg, rgba(255,255,255,.85), rgba(220,248,228,.6) 70%);
+    box-shadow: 0 0 1.6cqw rgba(31,191,85,.18), inset 0 1px 0 #fff; }
+  html[data-tema=claro] .acao[aria-pressed=true] .ic { color: var(--verde); filter: none; }
+  html[data-tema=claro] .acao[aria-pressed=true]::before { box-shadow: 0 0 .5cqw rgba(31,191,85,.6); }
+  html[data-tema=claro] .marca .raio { background: rgba(255,255,255,.75); border-color: rgba(31,191,85,.35); box-shadow: 0 .3cqw 1cqw rgba(70,120,170,.12); }
+  html[data-tema=claro] .marca .raio svg { filter: none; }
+  html[data-tema=claro] .chat header { border-bottom-color: rgba(120,160,200,.18); }
+  html[data-tema=claro] .ponto { box-shadow: 0 0 .5cqw rgba(31,191,85,.6); }
+  html[data-tema=claro] .menu:hover { background: rgba(16,36,58,.06); }
+  html[data-tema=claro] .av { border-color: rgba(255,255,255,.95); }
+  html[data-tema=claro] .av.bot { background-color: #dbe9f5; box-shadow: 0 .2cqw .8cqw rgba(70,120,170,.2); }
+  html[data-tema=claro] .av.eu { background: rgba(10,169,220,.14); color: #2b6d8f; }
+  html[data-tema=claro] .bolha { color: var(--texto); }
+  html[data-tema=claro] .msg.eu .bolha { background: rgba(178,226,250,.6); border-color: rgba(255,255,255,.9); }
+  html[data-tema=claro] .msg.bot .bolha { background: rgba(255,255,255,.72); border-color: rgba(255,255,255,.95); box-shadow: 0 .3cqw 1.2cqw rgba(70,120,170,.1); }
+  html[data-tema=claro] .bolha .fonte { color: #0786b3; opacity: 1; }
+  html[data-tema=claro] .sugestoes button { color: #0a6f96; background: rgba(255,255,255,.6); border-color: rgba(10,169,220,.3); }
+  html[data-tema=claro] .sugestoes button:hover { background: #fff; border-color: var(--ciano); }
+  html[data-tema=claro] .campo { background: rgba(255,255,255,.85); border-color: rgba(255,255,255,.95); color: var(--texto);
+    box-shadow: 0 .3cqw 1.2cqw rgba(70,120,170,.1); }
+  html[data-tema=claro] .campo::placeholder { color: #8296ab; }
+  html[data-tema=claro] .campo:focus { border-color: rgba(10,169,220,.6); box-shadow: 0 0 1.2cqw rgba(10,169,220,.18); }
+  html[data-tema=claro] .enviar { background: #12b6ea; color: #fff; box-shadow: 0 .4cqw 1.4cqw rgba(10,169,220,.45); }
+  html[data-tema=claro] .enviar:hover { box-shadow: 0 .4cqw 2cqw rgba(10,169,220,.6); }
+  html[data-tema=claro] .aviso { color: #6c8096; }
+  html[data-tema=claro] #carga { color: #0786b3; }
+  html[data-tema=claro] .chat { scrollbar-color: rgba(70,120,170,.3) transparent; }
+  html[data-tema=claro] .msgs { scrollbar-color: rgba(70,120,170,.3) transparent; }
+
   /* celular e tablet em pé: a tela 16:9 ficaria minúscula, então os blocos empilham —
      a robô no alto, os cards em grade 2 × 2 e o chat embaixo, com medidas em px */
   @media (max-width: 760px), (max-aspect-ratio: 1/1) {
@@ -131,6 +194,8 @@
     .acoes { position: static; width: auto; grid-template-columns: 1fr 1fr; gap: 10px; }
     .acao { height: auto; min-height: 68px; border-radius: 14px; gap: 10px; padding: 12px; font-size: 15px; }
     .acao svg { width: 24px; height: 24px; }
+    html[data-tema=claro] .acao .ic { width: 38px; height: 38px; border-radius: 10px; }
+    html[data-tema=claro] .acao .ic svg { width: 22px; height: 22px; }
     .acao .seta { display: none; }
     .acao .rot { gap: 4px; }
     .acao small { font-size: 11.5px; }
@@ -205,7 +270,8 @@
   // ---------- a robô ----------
   const carga = document.getElementById('carga');
   const robo = window.robo = criarRobo(document.getElementById('palco3d'), {
-    modelo: 'assets/models/robo.glb', grade: true, enquadre: { y: 0.19, dist: 3.25, alvoX: 0 },
+    modelo: 'assets/models/robo.glb', grade: true, enquadre: { y: 0.3, dist: 3.8, alvoX: 0 },  // mais longe: o modelo ficou mais leve, e de perto perdia nitidez
+    claro: document.documentElement.dataset.tema === 'claro',
     aoProgresso: (p) => carga.textContent = `CARREGANDO A ASSISTENTE… ${Math.round(p * 100)}%`,
     aoCarregar: () => { carga.style.opacity = 0; setTimeout(() => carga.remove(), 700); robo.pulsar(); },
   });
@@ -345,6 +411,17 @@
     responder('Nova conversa. Em que posso ajudar na operação hoje?');
   });
   campo.addEventListener('focus', () => olharPara(campo, 900));
+
+  // ---------- tema ----------
+  // o Simulador avisa quando o botão claro/escuro muda; aberta sozinha, a página segue o sistema
+  function aplicarTema(escuro) {
+    document.documentElement.dataset.tema = escuro ? 'escuro' : 'claro';
+    robo.tema(!escuro);
+  }
+  addEventListener('message', (e) => {
+    if (e.origin === location.origin && e.data && e.data.tipo === 'tema') aplicarTema(e.data.escuro);
+  });
+  if (parent === window) matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => aplicarTema(e.matches));
 </script>
 </body>
 </html>

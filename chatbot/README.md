@@ -39,6 +39,12 @@ No app, a página abre na rota `#/chatbot` (`js/views/chatbot.js`), dentro de um
 superior. Em telas estreitas ou em pé (celular, tablet na vertical), os blocos empilham: a robô no alto, os cards em
 grade 2 × 2 e o chat embaixo.
 
+**Tema claro e escuro.** Dentro do app, a página segue o botão claro/escuro (lê a escolha ao abrir e recebe um
+`postMessage` `{ tipo: 'tema', escuro }` a cada troca); aberta sozinha, segue o sistema. O escuro é o da BOT-008. O
+claro (vidro branco sobre azul-gelo, ícones em ciano e verde) troca, na robô, o fundo pintado, a luz ambiente e o ajuste
+de tons (Neutral em vez de ACES, que acinzentava o fundo), esconde o anel e sobe o limiar do bloom para o fundo claro
+não brilhar: `robo.tema(claro)` em `assets/robo3d.js`.
+
 ## O modelo 3D comprimido
 
 O GLB original tinha 66 MB (1 milhão de vértices, texturas 4K). Ele foi otimizado com o
