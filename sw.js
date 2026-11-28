@@ -33,7 +33,12 @@ self.addEventListener('fetch', (evento) => {
   evento.respondWith((async () => {
     const cache = await caches.open(CACHE);
     try {
-      const resposta = await fetch(req);
+      // 'no-cache' confere com o servidor a cada vez (304 quando nada mudou).
+      // Sem isso o cache HTTP do navegador (10 min no GitHub Pages) entregava
+      // arquivos antigos misturados com novos logo depois de uma publicação:
+      // index.html novo com um módulo antigo, e a página quebrava.
+      const mesmaOrigem = url.origin === self.location.origin;
+      const resposta = await fetch(req, mesmaOrigem ? { cache: 'no-cache' } : undefined);
       if (resposta.ok) cache.put(req, resposta.clone());
       return resposta;
     } catch (erro) {
