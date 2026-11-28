@@ -194,7 +194,8 @@ export function criarRobo(container, { modelo, aoCarregar, aoProgresso, enquadre
     atual.yaw += (a.yaw + Math.sin(t * 0.37) * 0.03 - atual.yaw) * k;
     atual.pitch += (a.pitch + Math.sin(t * 0.53) * 0.015 + falando * Math.sin(t * 7.5) * 0.025 - atual.pitch) * k;
     atual.roll += (-atual.yaw * 0.12 + Math.sin(t * 0.29) * 0.012 - atual.roll) * k;
-    eu.set(-atual.pitch, atual.yaw, atual.roll, 'YXZ');
+    // ny cresce para baixo (como clientY): pitch positivo inclina a cabeça para baixo, acompanhando o cursor
+    eu.set(atual.pitch, atual.yaw, atual.roll, 'YXZ');
     // a rotação vai para o espaço do GLB (girado -90° em Y): fix⁻¹ · R · fix
     m4.makeRotationFromEuler(eu); m4.premultiply(FIXI).multiply(FIX);
     U.uHead.value.setFromMatrix4(m4);
