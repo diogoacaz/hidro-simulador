@@ -67,12 +67,27 @@ coordenadas da malha não mudaram, então a calibração do pescoço no shader c
   - `olhar(x, y)`: a cabeça olha para um ponto (−1 a 1 em cada eixo); a página liga isso ao cursor;
   - `fixar(x, y, ms)`: olha para um ponto por um tempo (ex.: para o chat enquanto responde);
   - `falar(true|false)`: modo fala (a cabeça acena, o brilho pulsa);
-  - `pulsar()`: um pulso de luz.
+  - `pulsar()`: um pulso de luz;
+  - `pensar(true|false)`: modo pensando (anéis aceleram, varredura contínua);
+  - `tema(claro)`: troca entre os temas claro e escuro.
 
   O modelo não tem esqueleto: o giro da cabeça é feito no vertex shader, só acima do pescoço. Os pontos de ajuste
   (`uPivot`, `uY0`, `uY1`) valem para este GLB; outro modelo precisa de outros valores.
 - **Chat:** `responder(html)` mostra os pontinhos de "pensando" e digita a resposta palavra por palavra. As respostas vêm
   de `RESPOSTAS` (pares expressão regular → HTML), e cada card tem um texto de abertura e sugestões em `ACOES`.
+
+## Efeitos
+
+- **Materialização:** ao carregar, uma linha de luz sobe pelo corpo e a robô aparece de baixo para cima (2,4 s); os anéis,
+  o brilho e as partículas surgem junto. Marca, cards e chat entram em cascata.
+- **Base dissolvida:** abaixo do peito cada pixel se mistura com a cor do fundo naquele ponto da tela (a textura do fundo
+  lida por `gl_FragCoord`), sem emenda. Partículas sobem da base e um brilho largo faz o pedestal de holograma.
+- **Varredura:** uma faixa de luz sobe pelo corpo a cada 7 s; enquanto ela pensa (`robo.pensar(true)`), sem parar.
+- **Anéis HUD** atrás da cabeça, em sentidos opostos, que aceleram ao pensar; **poeira de luz** pela cena; **paralaxe**
+  da câmera com o cursor; **cards** que inclinam em 3D sob o cursor.
+- **Chat:** o subtítulo vira "Consultando procedimentos…" com um brilho correndo, um cursor acompanha o texto, e `/`
+  leva ao campo de pergunta.
+- Com "reduzir movimento" ligado no sistema não há materialização, varredura, paralaxe nem entrada em cascata.
 
 ## Para ligar a uma IA de verdade
 

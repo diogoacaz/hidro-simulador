@@ -49,11 +49,12 @@
   .acao .ic { color: #d7e6e1; display: grid; place-items: center; transition: color .25s, filter .25s; }
   .acao::after { content: ''; position: absolute; inset: -1px; border-radius: inherit; pointer-events: none; opacity: 0;
                  background: radial-gradient(18cqw 8cqw at var(--mx, 50%) var(--my, 50%), rgba(47,216,255,.18), transparent 70%); transition: opacity .25s; }
-  .acao:hover { transform: translateX(.5cqw); border-color: rgba(47,216,255,.65); box-shadow: 0 0 1.6cqw rgba(47,216,255,.25), inset 0 1px 0 rgba(255,255,255,.2); }
+  .acao { transform: perspective(60cqw) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); }
+  .acao:hover { transform: perspective(60cqw) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) translateX(.5cqw); border-color: rgba(47,216,255,.65); box-shadow: 0 0 1.6cqw rgba(47,216,255,.25), inset 0 1px 0 rgba(255,255,255,.2); }
   .acao:hover::after { opacity: 1; }
   .acao:hover .ic { color: var(--ciano); filter: drop-shadow(0 0 .5cqw var(--ciano)); }
   .acao:hover .seta { transform: translateX(.35cqw); }
-  .acao:active { transform: translateX(.5cqw) scale(.985); }
+  .acao:active { transform: perspective(60cqw) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) translateX(.5cqw) scale(.985); }
   .acao[aria-pressed=true] { border-color: rgba(125,255,74,.75); background: linear-gradient(160deg, rgba(125,255,74,.14), rgba(60,140,80,.08) 70%);
                              box-shadow: 0 0 1.8cqw rgba(125,255,74,.28), inset 0 1px 0 rgba(255,255,255,.2); }
   .acao[aria-pressed=true]::before { content: ''; position: absolute; left: -1px; top: 18%; bottom: 18%; width: .28cqw; border-radius: 1cqw;
@@ -123,7 +124,34 @@
   .bolha .fonte { display: block; margin-top: .6cqw; font-size: .82cqw; color: var(--ciano); opacity: .85; }
   .bolha .alerta { color: var(--ambar); }
 
-  #carga { position: fixed; left: 50%; top: 50%; translate: -50% -50%; font: 500 13px Inter; letter-spacing: .1em; color: #7fdcff; transition: opacity .6s; }
+  #carga { position: fixed; left: 50%; top: 50%; translate: -50% -50%; font: 500 13px Inter; letter-spacing: .1em; color: #7fdcff; transition: opacity .6s;
+           text-align: center; }
+  /* a barra de progresso do modelo, embaixo do texto */
+  #carga::after { content: ''; display: block; width: 200px; height: 2px; margin: 14px auto 0; border-radius: 2px;
+                  background: linear-gradient(90deg, currentColor calc(var(--p, 0) * 100%), color-mix(in srgb, currentColor 18%, transparent) 0);
+                  box-shadow: 0 0 12px color-mix(in srgb, currentColor 45%, transparent); }
+
+  /* ---------- chegada: a marca, os cards e o chat entram em cascata enquanto a robô se materializa ---------- */
+  @media (prefers-reduced-motion: no-preference) {
+    .marca, .acoes li, .chat { animation: surge 1s cubic-bezier(.2,.8,.2,1) both; }
+    .marca { animation-delay: .15s; }
+    .acoes li { --de: -3cqw; }
+    .acoes li:nth-child(1) { animation-delay: .3s; } .acoes li:nth-child(2) { animation-delay: .4s; }
+    .acoes li:nth-child(3) { animation-delay: .5s; } .acoes li:nth-child(4) { animation-delay: .6s; }
+    .chat { --de: 3cqw; animation-delay: .45s; }
+  }
+  @keyframes surge { from { opacity: 0; transform: translateX(var(--de, 0)); } }
+
+  /* pensando: o subtítulo do chat vira um brilho que corre pelo texto */
+  .chat[data-pensando] header p { color: transparent; -webkit-background-clip: text; background-clip: text;
+    background-image: linear-gradient(90deg, var(--suave) 30%, var(--ciano) 50%, var(--suave) 70%); background-size: 200% 100%;
+    animation: correr 1.4s linear infinite; }
+  @keyframes correr { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+  /* o cursor que acompanha o texto enquanto a robô escreve */
+  .cursor { display: inline-block; width: .42cqw; height: 1.15cqw; margin-left: .25cqw; vertical-align: -.18cqw; border-radius: 1px;
+            background: var(--ciano); box-shadow: 0 0 .6cqw var(--ciano); animation: pisca .9s steps(1) infinite; }
+  @keyframes pisca { 50% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .chat[data-pensando] header p, .cursor { animation: none; } }
 
   /* ---------- tema claro: o do Simulador (canvas #f2f5f2, petróleo e lima), vidro branco, ícones em verde-água e verde ---------- */
   html[data-tema=claro] {
@@ -219,6 +247,7 @@
     .msg.eu time { bottom: -17px; }
     .msg.eu { margin-bottom: 10px; }
     .bolha .fonte { font-size: 12px; margin-top: 6px; }
+    .cursor { width: 7px; height: 15px; margin-left: 3px; vertical-align: -2px; }
     .digitando { gap: 4px; } .digitando i { width: 7px; height: 7px; }
     .sugestoes { gap: 6px; padding: 0 12px; }
     .sugestoes button { font-size: 13px; padding: 8px 12px; border-radius: 20px; }
@@ -251,7 +280,7 @@
   <div class="marca"><span class="raio"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M13.5 2 4 13.5h6.5L9.5 22 20 9.5h-6.6z"/></svg></span><span>Light Energia<small>Operação de usinas hidrelétricas</small></span></div>
 
   <section class="chat vidro" aria-label="Chat com a assistente de operação">
-    <header><span class="ponto" title="Online"></span><div class="titulos"><h1>Assistente de Operação</h1><p>Usinas hidrelétricas · turno atual</p></div><button class="menu" title="Nova conversa" aria-label="Nova conversa">•••</button></header>
+    <header><span class="ponto" title="Online"></span><div class="titulos"><h1>Assistente de Operação</h1><p id="subtitulo">Usinas hidrelétricas · turno atual</p></div><button class="menu" title="Nova conversa" aria-label="Nova conversa">•••</button></header>
     <div class="msgs" id="msgs" aria-live="polite"></div>
     <div class="sugestoes" id="sugestoes"></div>
     <form class="entrada" id="form">
@@ -270,7 +299,8 @@
   const robo = window.robo = criarRobo(document.getElementById('palco3d'), {
     modelo: 'assets/models/robo.glb', grade: true, enquadre: { y: 0.07, dist: 3.8, alvoX: 0 },  // centrada na tela; mais longe porque o modelo ficou mais leve e de perto perdia nitidez
     claro: document.documentElement.dataset.tema === 'claro',
-    aoProgresso: (p) => carga.textContent = `CARREGANDO A ASSISTENTE… ${Math.round(p * 100)}%`,
+    reduzirMovimento: matchMedia('(prefers-reduced-motion: reduce)').matches,
+    aoProgresso: (p) => { carga.textContent = `CARREGANDO A ASSISTENTE… ${Math.round(p * 100)}%`; carga.style.setProperty('--p', p); },
     aoCarregar: () => { carga.style.opacity = 0; setTimeout(() => carga.remove(), 700); robo.pulsar(); },
   });
   // a cabeça segue o cursor pela janela inteira (passar por um card = olhar para ele)
@@ -281,6 +311,7 @@
 
   // ---------- o chat ----------
   const msgs = document.getElementById('msgs'), chat = document.querySelector('.chat');
+  const subtitulo = document.getElementById('subtitulo'), SUBTITULO = subtitulo.textContent;
   const campo = document.getElementById('campo'), enviar = document.getElementById('enviar');
   const hora = () => new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   const ICONE_EU = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0z"/></svg>';
@@ -298,15 +329,21 @@
   // a assistente "pensa" (pontinhos), olha para o chat e fala enquanto o texto aparece palavra por palavra
   async function responder(html) {
     ocupado = true; enviar.disabled = true; chat.dataset.pensando = '';
+    subtitulo.textContent = 'Consultando procedimentos…';
+    robo.pensar(true);
     olharPara(chat, 1400);
     const m = bolha('bot', '<span class="digitando"><i></i><i></i><i></i></span>');
     await espera(700 + Math.random() * 500);
-    robo.falar(true); robo.pulsar();
+    robo.pensar(false); robo.falar(true); robo.pulsar();
+    subtitulo.textContent = 'Respondendo…';
     const caixa = m.querySelector('.bolha'), t = caixa.querySelector('time');
     const alvo = document.createElement('div'); alvo.innerHTML = html;
-    caixa.innerHTML = ''; caixa.append(t);
-    await digitar(alvo, caixa, t);
+    const cursor = document.createElement('span'); cursor.className = 'cursor'; cursor.setAttribute('aria-hidden', 'true');
+    caixa.innerHTML = ''; caixa.append(cursor, t);
+    await digitar(alvo, caixa, cursor);
+    cursor.remove();
     robo.falar(false); delete chat.dataset.pensando;
+    subtitulo.textContent = SUBTITULO;
     ocupado = false; enviar.disabled = false;
   }
   // copia a árvore de alvo para destino, revelando as palavras uma a uma
@@ -356,7 +393,13 @@
 
   const botoes = document.querySelectorAll('.acao');
   botoes.forEach((b) => {
-    b.addEventListener('pointermove', (e) => { const r = b.getBoundingClientRect(); b.style.setProperty('--mx', `${e.clientX - r.left}px`); b.style.setProperty('--my', `${e.clientY - r.top}px`); });
+    b.addEventListener('pointermove', (e) => {
+      const r = b.getBoundingClientRect(), fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
+      b.style.setProperty('--mx', `${e.clientX - r.left}px`); b.style.setProperty('--my', `${e.clientY - r.top}px`);
+      // inclina o card em 3D na direção do cursor
+      b.style.setProperty('--ry', `${(fx - 0.5) * 9}deg`); b.style.setProperty('--rx', `${(0.5 - fy) * 12}deg`);
+    });
+    b.addEventListener('pointerleave', () => { b.style.setProperty('--rx', '0deg'); b.style.setProperty('--ry', '0deg'); });
     b.addEventListener('click', () => {
       if (ocupado) return;
       const a = b.dataset.acao; modo = a;
@@ -409,6 +452,10 @@
     responder('Nova conversa. Em que posso ajudar na operação hoje?');
   });
   campo.addEventListener('focus', () => olharPara(campo, 900));
+  // "/" leva ao campo de pergunta de qualquer lugar da página
+  addEventListener('keydown', (e) => {
+    if (e.key === '/' && document.activeElement !== campo && !e.ctrlKey && !e.metaKey) { e.preventDefault(); campo.focus(); }
+  });
 
   // ---------- tema ----------
   // o Simulador avisa quando o botão claro/escuro muda; aberta sozinha, a página segue o sistema

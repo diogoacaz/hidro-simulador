@@ -9,7 +9,8 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
-export function criarRobo(container, { modelo, aoCarregar, aoProgresso, enquadre = { y: 0.04, dist: 2.55, alvoX: 0 }, grade = false, claro = false } = {}) {
+export function criarRobo(container, { modelo, aoCarregar, aoProgresso, enquadre = { y: 0.04, dist: 2.55, alvoX: 0 }, grade = false, claro = false,
+  reduzirMovimento = false } = {}) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -80,6 +81,38 @@ export function criarRobo(container, { modelo, aoCarregar, aoProgresso, enquadre
   halo.position.set(0, 0.24, -0.32);
   cena.add(halo);
 
+  // anéis de interface (HUD) atrás da cabeça: um de marcações, como um mostrador, e um de arcos tracejados.
+  // Giram em sentidos opostos, devagar, e aceleram enquanto a robô pensa.
+  function texturaAnel(desenhar) {
+    const cv = document.createElement('canvas'); cv.width = cv.height = 1024;
+    const g = cv.getContext('2d'); g.translate(512, 512); g.strokeStyle = '#fff'; g.lineCap = 'round';
+    desenhar(g);
+    const tx = new THREE.CanvasTexture(cv); tx.anisotropy = 4; return tx;
+  }
+  const texMostrador = texturaAnel((g) => {
+    g.lineWidth = 2.5; g.beginPath(); g.arc(0, 0, 470, 0, Math.PI * 2); g.stroke();
+    for (let i = 0; i < 120; i++) {
+      const a = i / 120 * Math.PI * 2, longo = i % 10 === 0, r0 = longo ? 430 : 452;
+      g.lineWidth = longo ? 4 : 2; g.globalAlpha = longo ? 1 : 0.55;
+      g.beginPath(); g.moveTo(Math.cos(a) * r0, Math.sin(a) * r0); g.lineTo(Math.cos(a) * 466, Math.sin(a) * 466); g.stroke();
+    }
+    g.globalAlpha = 1; g.lineWidth = 9;
+    for (const [a0, a1] of [[0.15, 0.62], [2.3, 2.55], [3.9, 4.7]]) { g.beginPath(); g.arc(0, 0, 492, a0, a1); g.stroke(); }
+  });
+  const texArcos = texturaAnel((g) => {
+    g.lineWidth = 5; g.setLineDash([26, 18]);
+    g.beginPath(); g.arc(0, 0, 400, 0.3, 2.6); g.stroke();
+    g.beginPath(); g.arc(0, 0, 400, 3.5, 5.6); g.stroke();
+    g.setLineDash([]); g.lineWidth = 2; g.globalAlpha = 0.6;
+    g.beginPath(); g.arc(0, 0, 372, 0, Math.PI * 2); g.stroke();
+  });
+  const matAnel = (tx) => new THREE.MeshBasicMaterial({ map: tx, color: new THREE.Color(0x29d9ff).multiplyScalar(1.6), transparent: true,
+    opacity: 0.3, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false });
+  const anelMostrador = new THREE.Mesh(new THREE.PlaneGeometry(0.98, 0.98), matAnel(texMostrador));
+  const anelArcos = new THREE.Mesh(new THREE.PlaneGeometry(0.98, 0.98), matAnel(texArcos));
+  anelMostrador.position.set(0, 0.24, -0.36); anelArcos.position.set(0, 0.24, -0.34);
+  cena.add(anelMostrador, anelArcos);
+
   // luz: chave quente-neutra de frente, contraluz ciano e verde nos lados (como na imagem)
   const hemi = new THREE.HemisphereLight(0xdfefff, 0x0a1830, 0.55); cena.add(hemi);
   const chave = new THREE.DirectionalLight(0xffffff, 1.2); chave.position.set(0.6, 1.0, 2.2); cena.add(chave);
@@ -104,6 +137,10 @@ export function criarRobo(container, { modelo, aoCarregar, aoProgresso, enquadre
     // A cor do fundo vem da própria textura dele, lida na posição do pixel na tela (ela cobre a tela inteira),
     // então a transição não tem emenda, em qualquer tema e tamanho de janela.
     uBg: { value: ft }, uRes: { value: new THREE.Vector2(1, 1) }, uFade: { value: new THREE.Vector2(-0.47, -0.2) },
+    // materialização: acima de uRevela a robô ainda não existe (é só fundo) e na linha corre uma borda de luz;
+    // varredura: uma faixa de luz que sobe pelo corpo de tempos em tempos (e sem parar enquanto ela pensa)
+    uRevela: { value: reduzirMovimento ? 2 : -0.6 }, uRevelaA: { value: 0 },
+    uScanY: { value: -1 }, uScanA: { value: 0 }, uCorScan: { value: new THREE.Color(0x46f0ff) },
   };
 
   const grupo = new THREE.Group();
@@ -151,6 +188,24 @@ export function criarRobo(container, { modelo, aoCarregar, aoProgresso, enquadre
   brilhoBase.renderOrder = 2;
   cena.add(brilhoBase);
 
+  // poeira de luz: pontinhos que flutuam devagar pela cena toda e cintilam, dando profundidade ao fundo
+  const ND = 150;
+  const dPos = new Float32Array(ND * 3), dVida = new Float32Array(ND), dTam = new Float32Array(ND), dVel = new Float32Array(ND);
+  for (let i = 0; i < ND; i++) {
+    dPos[i * 3] = (Math.random() * 2 - 1) * 1.9; dPos[i * 3 + 1] = -0.75 + Math.random() * 1.7; dPos[i * 3 + 2] = -1.4 + Math.random() * 1.5;
+    dVida[i] = Math.random(); dTam[i] = 0.25 + Math.random() * 0.6; dVel[i] = 0.04 + Math.random() * 0.1;
+  }
+  const dGeo = new THREE.BufferGeometry();
+  dGeo.setAttribute('position', new THREE.BufferAttribute(dPos, 3));
+  dGeo.setAttribute('aVida', new THREE.BufferAttribute(dVida, 1));
+  dGeo.setAttribute('aTam', new THREE.BufferAttribute(dTam, 1));
+  const dMat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    uniforms: { uCor: { value: new THREE.Color(0x9ff7e6) }, uOpac: { value: 0.55 }, uEsc: { value: 400 } },
+    vertexShader: pMat.vertexShader, fragmentShader: pMat.fragmentShader });
+  const poeira = new THREE.Points(dGeo, dMat);
+  poeira.frustumCulled = false;
+  cena.add(poeira);
+
   // o modelo vem comprimido (Draco + texturas WebP): o decodificador Draco vem da mesma versão do Three.js,
   // servido pelo próprio app (vendor/three), sem depender de CDN
   const draco = new DRACOLoader().setDecoderPath(new URL('../../vendor/three/addons/libs/draco/gltf/', import.meta.url).href);
@@ -180,7 +235,8 @@ export function criarRobo(container, { modelo, aoCarregar, aoProgresso, enquadre
         sh.fragmentShader = sh.fragmentShader
           .replace('#include <common>', `#include <common>
             uniform float uGlow; varying float vHeadW; varying float vMundoY;
-            uniform sampler2D uBg; uniform vec2 uRes, uFade;`)
+            uniform sampler2D uBg; uniform vec2 uRes, uFade;
+            uniform float uRevela, uRevelaA, uScanY, uScanA; uniform vec3 uCorScan;`)
           .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
             vec3 cBase = diffuseColor.rgb;
             float mx = max(cBase.r, max(cBase.g, cBase.b)), mn = min(cBase.r, min(cBase.g, cBase.b));
@@ -191,7 +247,13 @@ export function criarRobo(container, { modelo, aoCarregar, aoProgresso, enquadre
             // dissolve: a curva suave (ease) deixa o meio da transição mais longo que as pontas
             float fundoW = 1.0 - smoothstep(uFade.x, uFade.y, vMundoY);
             fundoW = fundoW * fundoW * (3.0 - 2.0 * fundoW);
-            gl_FragColor.rgb = mix(gl_FragColor.rgb, texture2D(uBg, gl_FragCoord.xy / uRes).rgb, fundoW);`);
+            float corpo = 1.0 - fundoW;
+            // ainda não materializada acima da linha
+            fundoW = max(fundoW, smoothstep(uRevela - 0.004, uRevela + 0.004, vMundoY));
+            gl_FragColor.rgb = mix(gl_FragColor.rgb, texture2D(uBg, gl_FragCoord.xy / uRes).rgb, fundoW);
+            // a borda da materialização e a faixa da varredura, só sobre o corpo visível
+            float dr = (vMundoY - uRevela) / 0.012, ds = (vMundoY - uScanY) / 0.02;
+            gl_FragColor.rgb += uCorScan * corpo * (exp(-dr * dr) * uRevelaA * 3.0 + exp(-ds * ds) * uScanA);`);
       };
       m.needsUpdate = true;
     });
@@ -204,17 +266,22 @@ export function criarRobo(container, { modelo, aoCarregar, aoProgresso, enquadre
     const esc = 1 / tam.y;
     grupo.scale.setScalar(esc);
     grupo.add(gltf.scene);
+    revelaIni = -1;  // a materialização começa no próximo quadro
     aoCarregar?.();
   }, (ev) => ev.total && aoProgresso?.(ev.loaded / ev.total), (e) => console.error(e));
 
   // estado: olhar (cursor), fala, foco
   const alvo = { yaw: 0, pitch: 0 }, atual = { yaw: 0, pitch: 0, roll: 0 };
-  let falando = 0, falaAlvo = 0, pulso = 0, fixo = null;
+  let falando = 0, falaAlvo = 0, pulso = 0, fixo = null, pensando = 0, pensaAlvo = 0, opAneis = 0.3;
+  let revelaIni = null, proxScan = 3, scanIni = -10;
+  const cursor = { x: 0, y: 0 }, par = { x: 0, y: 0 };
   const api = {
-    olhar(nx, ny) { alvo.yaw = THREE.MathUtils.clamp(nx, -1, 1) * 0.34; alvo.pitch = THREE.MathUtils.clamp(ny, -1, 1) * 0.22; },
+    olhar(nx, ny) { cursor.x = THREE.MathUtils.clamp(nx, -1, 1); cursor.y = THREE.MathUtils.clamp(ny, -1, 1); alvo.yaw = THREE.MathUtils.clamp(nx, -1, 1) * 0.34; alvo.pitch = THREE.MathUtils.clamp(ny, -1, 1) * 0.22; },
     falar(ligado) { falaAlvo = ligado ? 1 : 0; },
     fixar(nx, ny, ms = 1600) { fixo = { yaw: nx * 0.34, pitch: ny * 0.22, ate: performance.now() + ms }; },
     pulsar() { pulso = 1; },
+    // pensando: os anéis aceleram, a varredura passa sem parar e as partículas sobem mais rápido
+    pensar(ligado) { pensaAlvo = ligado ? 1 : 0; },
     // tema claro: fundo claro do Simulador, sem o anel e com a luz ambiente mais aberta; escuro: como na BOT-008
     tema(ehClaro) {
       cena.background = ehClaro ? ftClaro : ft;
@@ -234,6 +301,17 @@ export function criarRobo(container, { modelo, aoCarregar, aoProgresso, enquadre
       brilhoBase.material.color.set(ehClaro ? 0xc3ff24 : 0x2fd8c0);
       brilhoBase.material.opacity = ehClaro ? 0.22 : 0.4;
       brilhoBase.material.needsUpdate = true;
+      dMat.blending = pMat.blending; dMat.fragmentShader = pMat.fragmentShader; dMat.needsUpdate = true;
+      dMat.uniforms.uCor.value.set(ehClaro ? 0x5fb8a4 : 0x9ff7e6);
+      dMat.uniforms.uOpac.value = ehClaro ? 0.45 : 0.55;
+      // no claro os anéis viram traço verde-petróleo translúcido (somar luz sobre branco não aparece)
+      for (const m of [anelMostrador.material, anelArcos.material]) {
+        m.blending = ehClaro ? THREE.NormalBlending : THREE.AdditiveBlending;
+        m.color.set(ehClaro ? 0x1f6b57 : 0x29d9ff); if (!ehClaro) m.color.multiplyScalar(1.6);
+        m.needsUpdate = true;
+      }
+      opAneis = ehClaro ? 0.32 : 0.26;
+      U.uCorScan.value.set(ehClaro ? 0x12b89c : 0x46f0ff);
       hemi.color.set(ehClaro ? 0xf2f8ff : 0xdfefff); hemi.groundColor.set(ehClaro ? 0x9fb8cc : 0x0a1830);
       hemi.intensity = ehClaro ? 0.7 : 0.55;
       cena.environmentIntensity = ehClaro ? 0.5 : 0.45;
@@ -241,7 +319,7 @@ export function criarRobo(container, { modelo, aoCarregar, aoProgresso, enquadre
       renderer.toneMapping = ehClaro ? THREE.NeutralToneMapping : THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure = ehClaro ? 1.0 : 0.9;
     },
-    U, bloom, renderer, halo, camera,
+    U, bloom, renderer, halo, camera, composer,
   };
 
   function tamanho() {
@@ -249,14 +327,53 @@ export function criarRobo(container, { modelo, aoCarregar, aoProgresso, enquadre
     renderer.setSize(w, h, false); composer.setSize(w, h); bloom.setSize(w, h);
     camera.aspect = w / h; camera.updateProjectionMatrix();
     renderer.getDrawingBufferSize(U.uRes.value);
-    pMat.uniforms.uEsc.value = U.uRes.value.y;
+    pMat.uniforms.uEsc.value = dMat.uniforms.uEsc.value = U.uRes.value.y;
   }
   new ResizeObserver(tamanho).observe(container); tamanho();
 
   const rel = new THREE.Clock(), m4 = new THREE.Matrix4(), eu = new THREE.Euler();
   const FIX = new THREE.Matrix4().makeRotationY(-Math.PI / 2), FIXI = FIX.clone().invert();
+  let tAnt = 0;
   renderer.setAnimationLoop(() => {
-    const t = rel.getElapsedTime(), dt = Math.min(rel.getDelta() || 0.016, 0.05);
+    // getElapsedTime já consome o delta do relógio: o dt sai da diferença entre quadros
+    const t = rel.getElapsedTime(), dt = Math.min(Math.max(t - tAnt, 0.001), 0.05);
+    tAnt = t;
+    pensando += (pensaAlvo - pensando) * 0.06;
+    // materialização (2,4 s, desacelerando no fim)
+    if (revelaIni === -1) revelaIni = t;
+    let revelado = 1;
+    if (revelaIni !== null && !reduzirMovimento) {
+      const p = Math.min((t - revelaIni) / 2.4, 1), e = 1 - Math.pow(1 - p, 3);
+      U.uRevela.value = THREE.MathUtils.lerp(-0.55, 0.62, e);
+      U.uRevelaA.value = 1 - THREE.MathUtils.smoothstep(p, 0.82, 1);
+      if (p >= 1) U.uRevela.value = 2;
+      revelado = THREE.MathUtils.smoothstep(p, 0.45, 1);
+    } else if (revelaIni === null) revelado = 0;
+    // varredura: a cada 7 s parada; pensando, uma atrás da outra
+    if (!reduzirMovimento && revelado >= 1) {
+      const dur = pensando > 0.5 ? 1.1 : 1.8;
+      if (t >= proxScan) { scanIni = t; proxScan = t + (pensando > 0.5 ? 1.2 : 7); }
+      const q = (t - scanIni) / dur;
+      U.uScanY.value = THREE.MathUtils.lerp(-0.42, 0.56, q);
+      U.uScanA.value = q >= 0 && q <= 1 ? Math.sin(q * Math.PI) * (0.55 + pensando * 0.45) : 0;
+    }
+    // paralaxe: a câmera acompanha o cursor de leve
+    if (!reduzirMovimento) {
+      par.x += (cursor.x - par.x) * 0.04; par.y += (cursor.y - par.y) * 0.04;
+      camera.position.set(enquadre.alvoX + par.x * 0.1, enquadre.y - par.y * 0.05, enquadre.dist);
+      camera.lookAt(enquadre.alvoX, enquadre.y - 0.02, 0);
+    }
+    const giro = dt * (1 + pensando * 5);
+    anelMostrador.rotation.z -= giro * 0.06; anelArcos.rotation.z += giro * 0.1;
+    anelMostrador.material.opacity = opAneis * revelado * (1 + pensando * 0.8 + pulso * 0.6);
+    anelArcos.material.opacity = opAneis * 0.8 * revelado * (1 + pensando * 0.8 + pulso * 0.6);
+    for (let i = 0; i < ND; i++) {
+      dVida[i] = (dVida[i] + dt * dVel[i] * 0.8) % 1;
+      dPos[i * 3 + 1] += dt * dVel[i] * 0.12;
+      if (dPos[i * 3 + 1] > 0.95) dPos[i * 3 + 1] = -0.75;
+      dPos[i * 3] += Math.sin(t * 0.3 + i * 1.7) * dt * 0.012;
+    }
+    dGeo.attributes.position.needsUpdate = dGeo.attributes.aVida.needsUpdate = true;
     falando += (falaAlvo - falando) * 0.08;
     pulso *= 0.94;
     // olhar suave + micro-movimentos ociosos; falando, a cabeça acena de leve
@@ -275,18 +392,19 @@ export function criarRobo(container, { modelo, aoCarregar, aoProgresso, enquadre
     grupo.rotation.y = atual.yaw * 0.18;
     grupo.position.y = Math.sin(t * 0.8) * 0.004;
     ciano.intensity = 2.2 + falando * 1.5 + pulso * 2;
-    halo.material.opacity = 0.75 + Math.sin(t * 2.0) * 0.12 + falando * 0.15 + pulso * 0.2;
+    halo.material.opacity = (0.75 + Math.sin(t * 2.0) * 0.12 + falando * 0.15 + pulso * 0.2 + pensando * 0.15) * revelado;
     halo.scale.setScalar(1 + pulso * 0.04 + falando * Math.sin(t * 6) * 0.006);
     // partículas: sobem, giram de leve com o corpo e renascem embaixo
     for (let i = 0; i < NP; i++) {
       pVida[i] += dt * pVel[i] * 2.2;
       if (pVida[i] >= 1) sortear(i, false);
-      pPos[i * 3 + 1] += dt * pVel[i] * (0.6 + falando);
+      pPos[i * 3 + 1] += dt * pVel[i] * (0.6 + falando + pensando);
       pPos[i * 3] += Math.sin(t * 0.9 + i) * dt * 0.01;
     }
     pGeo.attributes.position.needsUpdate = pGeo.attributes.aVida.needsUpdate = true;
     particulas.rotation.y = grupo.rotation.y;
-    brilhoBase.material.opacity = (U.uBg.value === ftClaro ? 0.22 : 0.32) * (1 + Math.sin(t * 1.3) * 0.12 + pulso * 0.6 + falando * 0.2);
+    brilhoBase.material.opacity = (U.uBg.value === ftClaro ? 0.22 : 0.32) * (1 + Math.sin(t * 1.3) * 0.12 + pulso * 0.6 + falando * 0.2 + pensando * 0.3) * revelado;
+    particulas.visible = revelado > 0;
     composer.render(dt);
   });
   api.tema(claro);
