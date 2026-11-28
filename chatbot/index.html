@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Assistente de Operação · Light Energia</title>
+<style>
+  /* Inter servida pelo próprio app (sem Google Fonts: funciona na rede interna e sem internet) */
+  @font-face { font-family: Inter; font-style: normal; font-weight: 100 900; font-display: swap;
+               src: url(../fontes/inter-latin-wght-normal.woff2) format("woff2");
+               unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+  @font-face { font-family: Inter; font-style: normal; font-weight: 100 900; font-display: swap;
+               src: url(../fontes/inter-latin-ext-wght-normal.woff2) format("woff2");
+               unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+  :root {
+    --ciano: #2fd8ff; --ciano-f: #2fd8ff55; --verde: #7dff4a; --verde-f: #7dff4a55; --ambar: #ffc93a;
+    --vidro: rgba(120, 170, 220, .10); --vidro-2: rgba(140, 190, 240, .16); --borda: rgba(170, 220, 255, .28);
+    --texto: #eef6ff; --suave: #a9bfd8;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #030814; color: var(--texto); font-family: Inter, system-ui, sans-serif; overflow: hidden; }
+  #palco3d { position: fixed; inset: 0; }
+  /* a tela 16:9 da BOT-008, que escala com a janela (cqw = 1% da largura do palco) */
+  .tela { position: fixed; left: 50%; top: 50%; translate: -50% -50%; width: min(100vw, 177.78vh); aspect-ratio: 16 / 9;
+          container-type: inline-size; pointer-events: none; }
+  .tela > * { pointer-events: auto; }
+
+  .vidro { background: linear-gradient(160deg, var(--vidro-2), var(--vidro) 60%);
+           backdrop-filter: blur(14px) saturate(140%); -webkit-backdrop-filter: blur(14px) saturate(140%);
+           border: 1px solid var(--borda); box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 10px 40px rgba(0,8,30,.45); }
+
+  /* os quatro cards de ação */
+  .acoes { position: absolute; left: 2.95cqw; top: 11cqw; width: 25.1cqw; display: grid; gap: 1.35cqw; margin: 0; padding: 0; list-style: none; }
+  .acao { position: relative; height: 8.5cqw; border-radius: 1.2cqw; display: flex; align-items: center; gap: 2.2cqw; padding: 0 2.1cqw 0 2.3cqw;
+          color: var(--texto); font: 500 1.4cqw/1 Inter, sans-serif; cursor: pointer; text-align: left; width: 100%;
+          transition: transform .25s cubic-bezier(.2,.8,.2,1), border-color .25s, box-shadow .25s, background .25s; }
+  .acao svg { width: 2.9cqw; height: 2.9cqw; stroke: currentColor; flex: none; }
+  .acao .seta { width: 1.3cqw; height: 1.3cqw; margin-left: auto; opacity: .75; transition: transform .25s; }
+  .acao .ic { color: #cfe9ff; display: grid; place-items: center; transition: color .25s, filter .25s; }
+  .acao::after { content: ''; position: absolute; inset: -1px; border-radius: inherit; pointer-events: none; opacity: 0;
+                 background: radial-gradient(18cqw 8cqw at var(--mx, 50%) var(--my, 50%), rgba(47,216,255,.18), transparent 70%); transition: opacity .25s; }
+  .acao:hover { transform: translateX(.5cqw); border-color: rgba(47,216,255,.65); box-shadow: 0 0 1.6cqw rgba(47,216,255,.25), inset 0 1px 0 rgba(255,255,255,.2); }
+  .acao:hover::after { opacity: 1; }
+  .acao:hover .ic { color: var(--ciano); filter: drop-shadow(0 0 .5cqw var(--ciano)); }
+  .acao:hover .seta { transform: translateX(.35cqw); }
+  .acao:active { transform: translateX(.5cqw) scale(.985); }
+  .acao[aria-pressed=true] { border-color: rgba(125,255,74,.75); background: linear-gradient(160deg, rgba(125,255,74,.14), rgba(60,140,80,.08) 70%);
+                             box-shadow: 0 0 1.8cqw rgba(125,255,74,.28), inset 0 1px 0 rgba(255,255,255,.2); }
+  .acao[aria-pressed=true]::before { content: ''; position: absolute; left: -1px; top: 18%; bottom: 18%; width: .28cqw; border-radius: 1cqw;
+                                     background: var(--verde); box-shadow: 0 0 .8cqw var(--verde); }
+  .acao[aria-pressed=true] .ic { color: var(--verde); filter: drop-shadow(0 0 .5cqw var(--verde)); }
+  .acao:focus-visible { outline: 2px solid var(--ciano); outline-offset: 3px; }
+
+  /* o chat */
+  .chat { position: absolute; left: 68cqw; top: 3.8cqw; width: 29.9cqw; height: 47.8cqw; border-radius: 1.6cqw; display: flex; flex-direction: column; overflow: hidden; }
+  .chat header { display: flex; align-items: center; gap: 1cqw; padding: 2cqw 2.2cqw 1.6cqw; border-bottom: 1px solid rgba(170,220,255,.14); }
+  .chat h1 { font: 500 1.6cqw/1 Inter, sans-serif; margin: 0; letter-spacing: .01em; }
+  .ponto { width: .8cqw; height: .8cqw; border-radius: 50%; background: var(--verde); box-shadow: 0 0 .8cqw var(--verde); animation: viva 2.4s ease-in-out infinite; }
+  .chat[data-pensando] .ponto { background: var(--ciano); box-shadow: 0 0 .8cqw var(--ciano); animation-duration: .7s; }
+  @keyframes viva { 50% { opacity: .45; transform: scale(.85); } }
+  .menu { margin-left: auto; background: none; border: 0; color: var(--suave); font: 600 1.5cqw/1 Inter; letter-spacing: .15em; cursor: pointer; padding: .4cqw; border-radius: .5cqw; }
+  .menu:hover { color: var(--texto); background: rgba(255,255,255,.06); }
+  .msgs { flex: 1; overflow-y: auto; padding: 1.8cqw 2.2cqw; display: flex; flex-direction: column; gap: 1.5cqw; scrollbar-width: thin; scrollbar-color: rgba(170,220,255,.25) transparent; }
+  .msg { display: flex; gap: .9cqw; align-items: flex-start; animation: entra .45s cubic-bezier(.2,.8,.2,1) both; }
+  @keyframes entra { from { opacity: 0; transform: translateY(.8cqw) scale(.98); } }
+  .msg.eu { flex-direction: row-reverse; }
+  .av { width: 3cqw; height: 3cqw; border-radius: 50%; flex: none; border: 1px solid rgba(170,220,255,.4); }
+  .av.bot { background: url(assets/avatar.jpg) 50% 22% / 380% no-repeat, #0b1a33; box-shadow: 0 0 .9cqw rgba(47,216,255,.35); }
+  .av.eu { display: grid; place-items: center; background: rgba(160,200,240,.18); color: #cfe2f7; }
+  .av.eu svg { width: 1.6cqw; height: 1.6cqw; }
+  .bolha { max-width: 21cqw; padding: 1cqw 1.3cqw; border-radius: 1cqw; font: 400 1.05cqw/1.5 Inter, sans-serif; color: #e6f1ff; position: relative; }
+  .msg.eu .bolha { background: rgba(130,175,225,.2); border: 1px solid rgba(170,220,255,.25); border-top-right-radius: .35cqw; }
+  .msg.bot .bolha { background: rgba(20,45,85,.45); border: 1px solid rgba(170,220,255,.2); border-top-left-radius: .35cqw; }
+  .bolha ol { margin: .6cqw 0 0; padding-left: 1.4cqw; display: grid; gap: .5cqw; }
+  .bolha time { display: block; text-align: right; font-size: .78cqw; color: var(--suave); margin-top: .5cqw; }
+  .msg.eu time { position: absolute; right: 0; bottom: -1.45cqw; }
+  .msg.eu { margin-bottom: .8cqw; }
+  .digitando { display: inline-flex; gap: .4cqw; padding: .3cqw 0; }
+  .digitando i { width: .55cqw; height: .55cqw; border-radius: 50%; background: var(--ciano); opacity: .4; animation: pula 1s infinite; }
+  .digitando i:nth-child(2) { animation-delay: .15s; } .digitando i:nth-child(3) { animation-delay: .3s; }
+  @keyframes pula { 30% { opacity: 1; transform: translateY(-.35cqw); } }
+  .entrada { display: flex; gap: 1cqw; padding: 1.4cqw 1.6cqw 1.8cqw; align-items: center; }
+  .campo { flex: 1; height: 4.2cqw; border-radius: 2.1cqw; border: 1px solid rgba(170,220,255,.28); background: rgba(10,28,58,.45);
+           color: var(--texto); font: 400 1.1cqw Inter, sans-serif; padding: 0 1.8cqw; outline: none; transition: border-color .2s, box-shadow .2s; }
+  .campo::placeholder { color: #8ea6c2; }
+  .campo:focus { border-color: rgba(47,216,255,.7); box-shadow: 0 0 1.2cqw rgba(47,216,255,.22); }
+  .enviar { width: 4.3cqw; height: 4.3cqw; border-radius: 50%; border: 0; cursor: pointer; display: grid; place-items: center; flex: none;
+            background: radial-gradient(circle at 35% 30%, #8cf0ff, #2fd8ff 55%, #13a9d6); color: #052238;
+            box-shadow: 0 0 1.6cqw rgba(47,216,255,.6); transition: transform .2s, box-shadow .2s, filter .2s; }
+  .enviar svg { width: 1.9cqw; height: 1.9cqw; }
+  .enviar:hover { transform: scale(1.07); box-shadow: 0 0 2.4cqw rgba(47,216,255,.85); }
+  .enviar:active { transform: scale(.94); }
+  .enviar:disabled { filter: grayscale(.6) brightness(.7); cursor: default; transform: none; }
+  .onda { position: absolute; inset: 0; border-radius: 50%; border: 2px solid var(--ciano); animation: onda .7s ease-out forwards; pointer-events: none; }
+  @keyframes onda { to { transform: scale(2.2); opacity: 0; } }
+
+  /* v1.2: operação de usinas */
+  .acao .rot { display: grid; gap: .45cqw; }
+  .acao small { font: 400 .92cqw/1.2 Inter, sans-serif; color: var(--suave); letter-spacing: .01em; }
+  .marca { position: absolute; left: 2.95cqw; top: 3.6cqw; display: flex; align-items: center; gap: 1cqw; font: 600 1.25cqw/1.15 Inter, sans-serif; letter-spacing: .02em; }
+  .marca small { display: block; font: 400 .9cqw/1.3 Inter, sans-serif; color: var(--suave); letter-spacing: .03em; }
+  .marca .raio { width: 2.9cqw; height: 2.9cqw; border-radius: .8cqw; display: grid; place-items: center; color: var(--verde);
+                 background: rgba(125,255,74,.1); border: 1px solid rgba(125,255,74,.35); box-shadow: 0 0 1.2cqw rgba(125,255,74,.22); }
+  .marca .raio svg { width: 1.6cqw; height: 1.6cqw; filter: drop-shadow(0 0 .4cqw var(--verde)); }
+  .chat .titulos { display: grid; gap: .35cqw; }
+  .chat header p { margin: 0; font: 400 .9cqw/1 Inter, sans-serif; color: var(--suave); }
+  .sugestoes { display: flex; flex-wrap: wrap; gap: .6cqw; padding: 0 1.6cqw; }
+  .sugestoes button { font: 400 .88cqw/1 Inter, sans-serif; color: #cfe9ff; background: rgba(47,216,255,.08); border: 1px solid rgba(47,216,255,.3);
+                      border-radius: 2cqw; padding: .6cqw .95cqw; cursor: pointer; transition: background .2s, border-color .2s, transform .2s; }
+  .sugestoes button:hover { background: rgba(47,216,255,.18); border-color: var(--ciano); transform: translateY(-.1cqw); }
+  .entrada { padding-bottom: .9cqw; }
+  .aviso { margin: 0; padding: 0 1.8cqw 1.3cqw; font: 400 .74cqw/1.35 Inter, sans-serif; color: #7f97b3; text-align: center; }
+  .bolha .fonte { display: block; margin-top: .6cqw; font-size: .82cqw; color: var(--ciano); opacity: .85; }
+  .bolha .alerta { color: var(--ambar); }
+
+  #carga { position: fixed; left: 50%; top: 50%; translate: -50% -50%; font: 500 13px Inter; letter-spacing: .1em; color: #7fdcff; transition: opacity .6s; }
+
+  /* celular e tablet em pé: a tela 16:9 ficaria minúscula, então os blocos empilham —
+     a robô no alto, os cards em grade 2 × 2 e o chat embaixo, com medidas em px */
+  @media (max-width: 760px), (max-aspect-ratio: 1/1) {
+    html, body { height: auto; overflow-x: hidden; overflow-y: auto; }
+    #palco3d { position: relative; height: min(56vh, 520px); }
+    #carga { position: absolute; top: min(28vh, 260px); font-size: 11px; white-space: nowrap; }
+    .tela { position: static; translate: none; width: auto; aspect-ratio: auto; container-type: normal;
+            display: flex; flex-direction: column; gap: 16px; padding: 0 16px 24px; margin-top: -24px; }
+    .marca { position: absolute; left: 16px; top: 16px; gap: 10px; font-size: 15px; }
+    .marca small { font-size: 12px; }
+    .marca .raio { width: 34px; height: 34px; border-radius: 10px; }
+    .marca .raio svg { width: 18px; height: 18px; filter: drop-shadow(0 0 4px var(--verde)); }
+
+    .acoes { position: static; width: auto; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .acao { height: auto; min-height: 68px; border-radius: 14px; gap: 10px; padding: 12px; font-size: 15px; }
+    .acao svg { width: 24px; height: 24px; }
+    .acao .seta { display: none; }
+    .acao .rot { gap: 4px; }
+    .acao small { font-size: 11.5px; }
+    .acao:hover, .acao:active { transform: none; }
+    .acao[aria-pressed=true]::before { width: 3px; }
+
+    .chat { position: static; width: auto; height: max(72vh, 480px); border-radius: 16px; }
+    .chat header { gap: 10px; padding: 14px 16px 12px; }
+    .chat h1 { font-size: 17px; }
+    .chat header p { font-size: 12px; }
+    .ponto { width: 8px; height: 8px; box-shadow: 0 0 8px var(--verde); }
+    .menu { font-size: 16px; padding: 6px; border-radius: 6px; }
+    .msgs { padding: 14px; gap: 14px; }
+    .msg { gap: 8px; }
+    .av { width: 30px; height: 30px; }
+    .av.eu svg { width: 16px; height: 16px; }
+    .bolha { max-width: 84%; padding: 10px 12px; border-radius: 12px; font-size: 14px; }
+    .msg.eu .bolha, .msg.bot .bolha { border-top-right-radius: 12px; border-top-left-radius: 12px; }
+    .msg.eu .bolha { border-top-right-radius: 4px; }
+    .msg.bot .bolha { border-top-left-radius: 4px; }
+    .bolha ol { margin-top: 6px; padding-left: 18px; gap: 4px; }
+    .bolha time { font-size: 11px; margin-top: 4px; }
+    .msg.eu time { bottom: -17px; }
+    .msg.eu { margin-bottom: 10px; }
+    .bolha .fonte { font-size: 12px; margin-top: 6px; }
+    .digitando { gap: 4px; } .digitando i { width: 7px; height: 7px; }
+    .sugestoes { gap: 6px; padding: 0 12px; }
+    .sugestoes button { font-size: 13px; padding: 8px 12px; border-radius: 20px; }
+    .entrada { gap: 10px; padding: 12px 12px 8px; }
+    .campo { height: 46px; border-radius: 23px; font-size: 16px; padding: 0 18px; }  /* 16 px: o iPhone não dá zoom no campo */
+    .enviar { width: 46px; height: 46px; box-shadow: 0 0 14px rgba(47,216,255,.6); }
+    .enviar svg { width: 20px; height: 20px; }
+    .aviso { font-size: 11px; padding: 0 16px 12px; }
+  }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "../vendor/three/three.module.min.js",
+  "three/addons/": "../vendor/three/addons/"
+} }
+</script>
+</head>
+<body>
+<div id="palco3d"></div>
+<div id="carga">CARREGANDO A ASSISTENTE… 0%</div>
+
+<main class="tela">
+  <ul class="acoes" aria-label="Ações do assistente">
+    <li><button class="acao vidro" data-acao="procedimentos" aria-pressed="true"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M9 10h6M9 14h6M9 18h3"/></svg></span><span class="rot">Procedimentos<small>POPs e instruções</small></span><svg class="seta" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="m9 6 6 6-6 6"/></svg></button></li>
+    <li><button class="acao vidro" data-acao="alarmes"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 4.2 2.6 17.5A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0z"/><path d="M12 9.5v4M12 17h.01"/></svg></span><span class="rot">Alarmes<small>diagnóstico e resposta</small></span><svg class="seta" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="m9 6 6 6-6 6"/></svg></button></li>
+    <li><button class="acao vidro" data-acao="manobras"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v8"/><path d="M6.4 6.6a8 8 0 1 0 11.2 0"/></svg></span><span class="rot">Manobras<small>partida, parada, sincronismo</small></span><svg class="seta" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="m9 6 6 6-6 6"/></svg></button></li>
+    <li><button class="acao vidro" data-acao="seguranca"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.4 7.5 9.5 4.3-1.1 7.5-4.9 7.5-9.5V6z"/><rect x="9" y="11" width="6" height="5" rx="1"/><path d="M10.2 11V9.6a1.8 1.8 0 0 1 3.6 0V11"/></svg></span><span class="rot">Segurança<small>bloqueio e NR-10</small></span><svg class="seta" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="m9 6 6 6-6 6"/></svg></button></li>
+  </ul>
+
+  <div class="marca"><span class="raio"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M13.5 2 4 13.5h6.5L9.5 22 20 9.5h-6.6z"/></svg></span><span>Light Energia<small>Operação de usinas hidrelétricas</small></span></div>
+
+  <section class="chat vidro" aria-label="Chat com a assistente de operação">
+    <header><span class="ponto" title="Online"></span><div class="titulos"><h1>Assistente de Operação</h1><p>Usinas hidrelétricas · turno atual</p></div><button class="menu" title="Nova conversa" aria-label="Nova conversa">•••</button></header>
+    <div class="msgs" id="msgs" aria-live="polite"></div>
+    <div class="sugestoes" id="sugestoes"></div>
+    <form class="entrada" id="form">
+      <input class="campo" id="campo" placeholder="Pergunte sobre a operação…" autocomplete="off" aria-label="Mensagem">
+      <button class="enviar" id="enviar" title="Enviar" aria-label="Enviar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M21 3 3 10.5l7.5 3L21 3l-7.5 18-3-7.5"/></svg></button>
+    </form>
+    <p class="aviso">Demonstração com respostas simuladas. Siga sempre os procedimentos oficiais vigentes e as orientações do centro de operação.</p>
+  </section>
+</main>
+
+<script type="module">
+  import { criarRobo } from './assets/robo3d.js';
+
+  // ---------- a robô ----------
+  const carga = document.getElementById('carga');
+  const robo = window.robo = criarRobo(document.getElementById('palco3d'), {
+    modelo: 'assets/models/robo.glb', grade: true, enquadre: { y: 0.19, dist: 3.25, alvoX: 0 },
+    aoProgresso: (p) => carga.textContent = `CARREGANDO A ASSISTENTE… ${Math.round(p * 100)}%`,
+    aoCarregar: () => { carga.style.opacity = 0; setTimeout(() => carga.remove(), 700); robo.pulsar(); },
+  });
+  // a cabeça segue o cursor pela janela inteira (passar por um card = olhar para ele)
+  const nx = (x) => (x / innerWidth) * 2 - 1, ny = (y) => (y / innerHeight) * 2 - 1;
+  addEventListener('pointermove', (e) => robo.olhar(nx(e.clientX), ny(e.clientY)));
+  document.getElementById('palco3d').addEventListener('click', () => { robo.pulsar(); robo.fixar(0, -0.05, 900); });
+  const olharPara = (el, ms) => { const r = el.getBoundingClientRect(); robo.fixar(nx(r.left + r.width / 2), ny(r.top + r.height / 2), ms); };
+
+  // ---------- o chat ----------
+  const msgs = document.getElementById('msgs'), chat = document.querySelector('.chat');
+  const campo = document.getElementById('campo'), enviar = document.getElementById('enviar');
+  const hora = () => new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const ICONE_EU = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0z"/></svg>';
+  const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+  function bolha(quem, html, quando = hora()) {
+    const m = document.createElement('div');
+    m.className = `msg ${quem}`;
+    m.innerHTML = `<div class="av ${quem}">${quem === 'eu' ? ICONE_EU : ''}</div><div class="bolha">${html}<time>${quando}</time></div>`;
+    msgs.append(m); msgs.scrollTo({ top: msgs.scrollHeight, behavior: 'smooth' });
+    return m;
+  }
+
+  let ocupado = false;
+  // a assistente "pensa" (pontinhos), olha para o chat e fala enquanto o texto aparece palavra por palavra
+  async function responder(html) {
+    ocupado = true; enviar.disabled = true; chat.dataset.pensando = '';
+    olharPara(chat, 1400);
+    const m = bolha('bot', '<span class="digitando"><i></i><i></i><i></i></span>');
+    await espera(700 + Math.random() * 500);
+    robo.falar(true); robo.pulsar();
+    const caixa = m.querySelector('.bolha'), t = caixa.querySelector('time');
+    const alvo = document.createElement('div'); alvo.innerHTML = html;
+    caixa.innerHTML = ''; caixa.append(t);
+    await digitar(alvo, caixa, t);
+    robo.falar(false); delete chat.dataset.pensando;
+    ocupado = false; enviar.disabled = false;
+  }
+  // copia a árvore de alvo para destino, revelando as palavras uma a uma
+  async function digitar(origem, destino, antes) {
+    for (const no of [...origem.childNodes]) {
+      if (no.nodeType === 3) {
+        const txt = document.createTextNode(''); destino.insertBefore(txt, antes);
+        for (const p of no.textContent.split(/(\s+)/)) { txt.textContent += p; if (p.trim()) { msgs.scrollTop = msgs.scrollHeight; await espera(28 + Math.random() * 40); } }
+      } else {
+        const el = no.cloneNode(false); destino.insertBefore(el, antes);
+        await digitar(no, el, null);
+      }
+    }
+  }
+  const espera = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // a conversa inicial: um operador pergunta sobre a partida de uma unidade
+  bolha('eu', 'Qual a sequência para partir a unidade geradora 2?', '06:42');
+  bolha('bot', 'Sequência geral de partida (confira o POP da sua usina):<ol><li>Confirme com o centro de operação a liberação e o despacho da unidade.</li><li>Verifique os auxiliares: óleo dos mancais, água de resfriamento, regulador de velocidade e excitação.</li><li>Abra o distribuidor conforme o POP, acompanhe a rotação e faça o sincronismo.</li><li>Registre a manobra no livro de operação.</li></ol><span class="fonte">Fonte: POP de partida de UG · verifique a revisão vigente</span>', '06:42');
+
+  // ---------- as ações ----------
+  let modo = 'procedimentos';
+  const ACOES = {
+    procedimentos: { rotulo: 'Procedimentos',
+      abre: 'Qual procedimento você precisa? Posso localizar o POP, explicar cada etapa ou montar um checklist. Se for o caso, diga a usina e a unidade.',
+      sugestoes: ['Checklist de ronda do turno', 'Passagem de turno', 'Registro no livro de operação'] },
+    alarmes: { rotulo: 'Alarmes',
+      abre: 'Me diga o alarme como aparece no supervisório (tag ou texto) e a unidade. Eu trago as causas prováveis, o que verificar e quando escalar.',
+      sugestoes: ['Temperatura alta no mancal', 'Vibração elevada na unidade', 'Nível alto do reservatório'] },
+    manobras: { rotulo: 'Manobras',
+      abre: 'Qual manobra? Partida, parada normal, parada de emergência, sincronismo, transferência de carga ou operação de comportas do vertedouro.',
+      sugestoes: ['Partida da unidade', 'Parada de emergência', 'Abertura de comportas do vertedouro'] },
+    seguranca: { rotulo: 'Segurança',
+      abre: 'Antes de qualquer intervenção: autorização de trabalho, bloqueio e etiquetagem e teste de ausência de energia. Sobre qual atividade você quer orientação?',
+      sugestoes: ['Bloqueio para manutenção', 'Trabalho perto de partes energizadas', 'Entrada em espaço confinado'] },
+  };
+  const sugestoes = document.getElementById('sugestoes');
+  function mostrarSugestoes(lista) {
+    sugestoes.innerHTML = '';
+    for (const s of lista) {
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = s;
+      b.onclick = () => { if (!ocupado) { campo.value = s; document.getElementById('form').requestSubmit(); } };
+      sugestoes.append(b);
+    }
+  }
+  mostrarSugestoes(ACOES.procedimentos.sugestoes);
+
+  const botoes = document.querySelectorAll('.acao');
+  botoes.forEach((b) => {
+    b.addEventListener('pointermove', (e) => { const r = b.getBoundingClientRect(); b.style.setProperty('--mx', `${e.clientX - r.left}px`); b.style.setProperty('--my', `${e.clientY - r.top}px`); });
+    b.addEventListener('click', () => {
+      if (ocupado) return;
+      const a = b.dataset.acao; modo = a;
+      botoes.forEach((x) => x.setAttribute('aria-pressed', x === b));
+      olharPara(b, 700); robo.pulsar();
+      bolha('eu', ACOES[a].rotulo);
+      mostrarSugestoes(ACOES[a].sugestoes);
+      setTimeout(() => responder(esc(ACOES[a].abre)), 350);
+      campo.focus();
+    });
+  });
+
+  // respostas simuladas: orientações gerais, sempre remetendo ao procedimento oficial
+  const FONTE = (f) => `<span class="fonte">${f}</span>`;
+  const RESPOSTAS = [
+    [/mancal|temperatura/, 'Temperatura alta no mancal: verificações típicas<ol><li>Confirme a leitura em outro sensor e veja a tendência no supervisório.</li><li>Verifique vazão e temperatura da água de resfriamento e o nível e o aspecto do óleo do mancal.</li><li>Se continuar subindo, reduza carga ou pare a unidade conforme o POP de alarmes.</li><li>Comunique o centro de operação e registre a ocorrência.</li></ol><span class="alerta">⚠ Nunca iniba uma proteção para manter a unidade em operação.</span>' + FONTE('Fonte: POP de tratamento de alarmes da UG')],
+    [/vibra/, 'Vibração elevada: verificações típicas<ol><li>Compare os sensores dos mancais (guia, escora) e veja se a vibração muda com a carga.</li><li>Evite operar na faixa de carga em que a vibração aumenta (zona de cavitação ou de vórtice).</li><li>Verifique ruídos anormais e a temperatura dos mancais.</li><li>Persistindo, reduza carga ou pare a unidade e acione a manutenção.</li></ol>' + FONTE('Fonte: POP de tratamento de alarmes da UG')],
+    [/reservat|vertedou|comporta|cheia/, 'Nível do reservatório e vertedouro:<ol><li>Acompanhe nível e afluência no supervisório e confirme com a régua local.</li><li>Opere as comportas apenas com autorização do centro de operação e seguindo a regra operativa do reservatório.</li><li>Abra em etapas, verificando a resposta do nível e a jusante.</li><li>Em situação de emergência, siga o Plano de Ação de Emergência (PAE) da barragem.</li></ol>' + FONTE('Fonte: regra operativa do reservatório e PAE')],
+    [/emergenc|trip|desarm/, 'Parada de emergência (visão geral):<ol><li>Acione a parada de emergência pelo comando definido no POP.</li><li>Confirme fechamento do distribuidor, abertura do disjuntor e desexcitação.</li><li>Acompanhe a frenagem até a parada completa.</li><li>Comunique o centro de operação, registre a ocorrência e não normalize sem análise.</li></ol>' + FONTE('Fonte: POP de parada de emergência da UG')],
+    [/parti|sincron/, 'Partida da unidade (visão geral):<ol><li>Liberação e despacho confirmados com o centro de operação.</li><li>Auxiliares em operação: óleo, resfriamento, regulador, excitação.</li><li>Abertura do distribuidor e aceleração até a rotação nominal.</li><li>Excitação, sincronismo e tomada de carga conforme o despacho.</li></ol>' + FONTE('Fonte: POP de partida de UG')],
+    [/parada|parar/, 'Parada normal (visão geral):<ol><li>Confirme a programação com o centro de operação.</li><li>Reduza a carga de forma gradual e abra o disjuntor.</li><li>Desexcite, feche o distribuidor e acompanhe a frenagem.</li><li>Mantenha os auxiliares conforme o POP e registre.</li></ol>' + FONTE('Fonte: POP de parada de UG')],
+    [/bloquei|etiquet|manutenc|loto/, 'Bloqueio para manutenção (resumo):<ol><li>Confirme a ordem de serviço e a autorização de trabalho.</li><li>Isole todas as fontes de energia: elétrica, hidráulica e pneumática.</li><li>Aplique cadeado e etiqueta pessoal em cada ponto de isolamento.</li><li>Teste a ausência de energia e aterre quando aplicável.</li><li>Libere somente após a conferência do responsável.</li></ol>' + FONTE('Referências: NR-10 e procedimento interno de bloqueio')],
+    [/energiz|nr.?10|eletric/, 'Perto de partes energizadas:<ol><li>Só pessoal autorizado e com treinamento NR-10 válido.</li><li>Priorize desenergizar; se não for possível, siga o procedimento de trabalho energizado.</li><li>Use EPIs e EPCs adequados à tensão (vestimenta, luvas, protetor facial).</li><li>Respeite as distâncias de segurança e sinalize a área.</li></ol>' + FONTE('Referência: NR-10')],
+    [/confinad/, 'Espaço confinado (ex.: poço da turbina, conduto):<ol><li>Permissão de entrada e trabalho (PET) emitida.</li><li>Fontes isoladas e bloqueadas.</li><li>Medição contínua da atmosfera.</li><li>Vigia do lado de fora e plano de resgate pronto.</li></ol>' + FONTE('Referência: NR-33')],
+    [/ronda|checklist/, 'Checklist de ronda (modelo):<ol><li>Casa de força: ruídos, vazamentos de óleo e água, temperaturas.</li><li>Unidades: mancais, regulador, excitação, painéis sem alarme.</li><li>Auxiliares: compressores, bombas de drenagem, serviços auxiliares CA e CC.</li><li>Tomada d’água e vertedouro: níveis, grades, comportas.</li><li>Anormalidades registradas no livro de operação.</li></ol>' + FONTE('Modelo: adapte ao checklist da sua usina')],
+    [/turno|passagem/, 'Passagem de turno, o que repassar:<ol><li>Estado de cada unidade (em operação, parada, em manutenção) e a carga.</li><li>Alarmes ativos e ocorrências do turno.</li><li>Bloqueios e autorizações de trabalho em aberto.</li><li>Níveis do reservatório e manobras programadas.</li></ol>' + FONTE('Fonte: procedimento de passagem de turno')],
+    [/livro|registr/, 'No livro de operação, registre: horário, unidade e equipamento, a manobra ou ocorrência, quem autorizou (centro de operação) e o seu nome. Escreva de forma objetiva e sem rasuras.' + FONTE('Fonte: procedimento de registro de operação')],
+  ];
+  const semAcento = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  function resposta(txt) {
+    const t = semAcento(txt);
+    if (/^(oi|ola|bom dia|boa tarde|boa noite)\b/.test(t)) return 'Olá! Sou a assistente de operação das usinas. Pergunte sobre procedimentos, alarmes, manobras ou segurança.';
+    for (const [re, r] of RESPOSTAS) if (re.test(t)) return r;
+    return `Não encontrei um procedimento para “${esc(txt)}” nesta demonstração. Na versão final eu consultaria os POPs e os manuais da usina. Tente reformular ou escolha um tema à esquerda.`;
+  }
+
+  document.getElementById('form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const txt = campo.value.trim();
+    if (!txt || ocupado) return;
+    bolha('eu', esc(txt)); campo.value = '';
+    const o = document.createElement('span'); o.className = 'onda'; enviar.append(o); setTimeout(() => o.remove(), 700);
+    robo.pulsar();
+    responder(resposta(txt));
+  });
+  // ••• = nova conversa
+  document.querySelector('.menu').addEventListener('click', () => {
+    if (ocupado) return;
+    msgs.innerHTML = ''; robo.pulsar();
+    responder('Nova conversa. Em que posso ajudar na operação hoje?');
+  });
+  campo.addEventListener('focus', () => olharPara(campo, 900));
+</script>
+</body>
+</html>
