@@ -40,8 +40,9 @@ superior. Em telas estreitas ou em pé (celular, tablet na vertical), os blocos 
 grade 2 × 2 e o chat embaixo.
 
 **Tema claro e escuro.** Dentro do app, a página segue o botão claro/escuro (lê a escolha ao abrir e recebe um
-`postMessage` `{ tipo: 'tema', escuro }` a cada troca); aberta sozinha, segue o sistema. O escuro é o da BOT-008. O
-claro (vidro branco sobre azul-gelo, ícones em ciano e verde) troca, na robô, o fundo pintado, a luz ambiente e o ajuste
+`postMessage` `{ tipo: 'tema', escuro }` a cada troca); aberta sozinha, segue o sistema. Os dois usam as cores do
+Simulador: o escuro em verde-petróleo (#0d201c), o claro no canvas #f2f5f2 com halo lima, e o botão de enviar em lima. O
+claro (vidro branco, ícones em verde-água e verde) troca, na robô, o fundo pintado, a luz ambiente e o ajuste
 de tons (Neutral em vez de ACES, que acinzentava o fundo), esconde o anel e sobe o limiar do bloom para o fundo claro
 não brilhar: `robo.tema(claro)` em `assets/robo3d.js`.
 

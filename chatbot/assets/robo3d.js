@@ -28,14 +28,15 @@ export function criarRobo(container, { modelo, aoCarregar, aoProgresso, enquadre
   camera.position.set(enquadre.alvoX, enquadre.y, enquadre.dist);
   camera.lookAt(enquadre.alvoX, enquadre.y - 0.02, 0);
 
-  // fundo: o azul-marinho da referência, com um brilho no centro e duas faixas de luz (ciano e verde) desfocadas
+  // fundo escuro: o verde-petróleo do Simulador (canvas #0d201c, superfície #14332d), com um brilho no centro e
+  // manchas de luz verde-água e lima desfocadas
   const fc = document.createElement('canvas'); fc.width = 1600; fc.height = 900;
   const g = fc.getContext('2d');
   let gr = g.createRadialGradient(800, 400, 40, 800, 450, 980);
-  gr.addColorStop(0, '#0e2547'); gr.addColorStop(0.45, '#071631'); gr.addColorStop(1, '#020611');
+  gr.addColorStop(0, '#173b33'); gr.addColorStop(0.45, '#0d201c'); gr.addColorStop(1, '#06110e');
   g.fillStyle = gr; g.fillRect(0, 0, 1600, 900);
   g.filter = 'blur(60px)'; g.globalCompositeOperation = 'lighter';
-  for (const [x, y, c] of [[230, 160, '#0c6d8f'], [1380, 720, '#1d7a3a'], [1450, 120, '#0b4f7a'], [160, 760, '#0f5a3a']]) {
+  for (const [x, y, c] of [[230, 160, '#0f5a4c'], [1380, 720, '#33620f'], [1450, 120, '#0d4a40'], [160, 760, '#1f4f17']]) {
     gr = g.createRadialGradient(x, y, 0, x, y, 260); gr.addColorStop(0, c); gr.addColorStop(1, '#0000');
     g.fillStyle = gr; g.fillRect(x - 300, y - 300, 600, 600);
   }
@@ -54,15 +55,15 @@ export function criarRobo(container, { modelo, aoCarregar, aoProgresso, enquadre
   const ft = new THREE.CanvasTexture(fc); ft.colorSpace = THREE.SRGBColorSpace;
   cena.background = ft; cena.backgroundIntensity = 1;
 
-  // fundo do tema claro: azul-gelo com um clarão branco no centro, manchas azul e verde nos cantos e curvas
-  // brancas largas e desfocadas. Pintado aqui (e não em CSS atrás de um canvas transparente) porque o bloom
+  // fundo do tema claro: o canvas do Simulador (#f2f5f2) com o halo lima no alto, um clarão branco no centro,
+  // manchas verde-água e lima nos cantos e curvas brancas largas e desfocadas. Pintado aqui (e não em CSS atrás de um canvas transparente) porque o bloom
   // não preserva a transparência.
   const fcc = document.createElement('canvas'); fcc.width = 1600; fcc.height = 900;
   const c = fcc.getContext('2d');
-  let gc = c.createLinearGradient(0, 0, 1600, 900); gc.addColorStop(0, '#eaf3fb'); gc.addColorStop(1, '#d5e6f4');
+  let gc = c.createLinearGradient(0, 0, 1600, 900); gc.addColorStop(0, '#f4f7f4'); gc.addColorStop(1, '#e4ebe4');
   c.fillStyle = gc; c.fillRect(0, 0, 1600, 900);
   c.filter = 'blur(40px)';
-  for (const [x, y, r, cor] of [[800, 380, 640, 'rgba(255,255,255,.9)'], [110, 150, 420, 'rgba(160,208,240,.55)'], [1530, 820, 420, 'rgba(178,232,214,.5)']]) {
+  for (const [x, y, r, cor] of [[800, 380, 640, 'rgba(255,255,255,.9)'], [800, -120, 760, 'rgba(195,255,36,.16)'], [110, 150, 420, 'rgba(150,200,180,.35)'], [1530, 820, 420, 'rgba(195,255,36,.14)']]) {
     gc = c.createRadialGradient(x, y, 0, x, y, r); gc.addColorStop(0, cor); gc.addColorStop(1, 'rgba(255,255,255,0)');
     c.fillStyle = gc; c.fillRect(x - r, y - r, 2 * r, 2 * r);
   }
@@ -160,7 +161,7 @@ export function criarRobo(container, { modelo, aoCarregar, aoProgresso, enquadre
     falar(ligado) { falaAlvo = ligado ? 1 : 0; },
     fixar(nx, ny, ms = 1600) { fixo = { yaw: nx * 0.34, pitch: ny * 0.22, ate: performance.now() + ms }; },
     pulsar() { pulso = 1; },
-    // tema claro: fundo azul-gelo, sem o anel e com a luz ambiente mais aberta; escuro: como na BOT-008
+    // tema claro: fundo claro do Simulador, sem o anel e com a luz ambiente mais aberta; escuro: como na BOT-008
     tema(ehClaro) {
       cena.background = ehClaro ? ftClaro : ft;
       bloom.threshold = ehClaro ? 1.05 : 0.92;  // no claro o fundo chega perto de 1: só os LEDs (acima de 1) brilham
