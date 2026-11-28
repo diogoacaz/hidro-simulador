@@ -100,10 +100,56 @@ export function criarRobo(container, { modelo, aoCarregar, aoProgresso, enquadre
     uY0: { value: -0.155 }, uY1: { value: -0.06 },
     uBreath: { value: 0 },
     uGlow: { value: 1.2 },
+    // a base do busto se dissolve no fundo: abaixo de uFade.x o pixel é só o fundo, acima de uFade.y é só a robô.
+    // A cor do fundo vem da própria textura dele, lida na posição do pixel na tela (ela cobre a tela inteira),
+    // então a transição não tem emenda, em qualquer tema e tamanho de janela.
+    uBg: { value: ft }, uRes: { value: new THREE.Vector2(1, 1) }, uFade: { value: new THREE.Vector2(-0.47, -0.2) },
   };
 
   const grupo = new THREE.Group();
   cena.add(grupo);
+
+  // partículas de luz que sobem da base dissolvida e somem no peito: o corpo parece se desfazer em luz
+  const NP = 90;
+  const pPos = new Float32Array(NP * 3), pVida = new Float32Array(NP), pVel = new Float32Array(NP), pTam = new Float32Array(NP);
+  const sortear = (i, comeco) => {
+    const lado = Math.random() * 2 - 1;
+    pPos[i * 3] = lado * Math.abs(lado) * 0.5;                // mais densas no meio do corpo
+    pPos[i * 3 + 1] = -0.5 + Math.random() * 0.08;
+    pPos[i * 3 + 2] = -0.1 + Math.random() * 0.35;
+    pVida[i] = comeco ? Math.random() : 0;
+    pVel[i] = 0.05 + Math.random() * 0.09;
+    pTam[i] = 0.5 + Math.random();
+  };
+  for (let i = 0; i < NP; i++) sortear(i, true);
+  const pGeo = new THREE.BufferGeometry();
+  pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+  pGeo.setAttribute('aVida', new THREE.BufferAttribute(pVida, 1));
+  pGeo.setAttribute('aTam', new THREE.BufferAttribute(pTam, 1));
+  const pMat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    uniforms: { uCor: { value: new THREE.Color(0x7dffcf) }, uOpac: { value: 0.9 }, uEsc: { value: 400 } },
+    vertexShader: `attribute float aVida, aTam; uniform float uEsc; varying float vA;
+      void main() { vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv;
+        gl_PointSize = aTam * uEsc * 0.03 / -mv.z; vA = sin(aVida * 3.14159); }`,
+    fragmentShader: `uniform vec3 uCor; uniform float uOpac; varying float vA;
+      void main() { float d = length(gl_PointCoord - 0.5); float a = smoothstep(0.5, 0.0, d); a *= a * vA * uOpac;
+        gl_FragColor = vec4(uCor * a, a); }`,
+  });
+  const particulas = new THREE.Points(pGeo, pMat);
+  particulas.frustumCulled = false;
+  cena.add(particulas);
+  // um brilho largo e baixo na base: a luz de onde as partículas saem. Fica NA FRENTE do corpo (sem teste de
+  // profundidade): atrás, o corpo o tapava e a base dissolvida virava uma faixa mais escura que o fundo em volta
+  const bc = document.createElement('canvas'); bc.width = bc.height = 256;
+  const bg2 = bc.getContext('2d'), brg = bg2.createRadialGradient(128, 128, 0, 128, 128, 128);
+  brg.addColorStop(0, 'rgba(255,255,255,1)'); brg.addColorStop(0.4, 'rgba(255,255,255,.35)'); brg.addColorStop(1, 'rgba(255,255,255,0)');
+  bg2.fillStyle = brg; bg2.fillRect(0, 0, 256, 256);
+  const brilhoBase = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.42), new THREE.MeshBasicMaterial({
+    map: new THREE.CanvasTexture(bc), color: 0x2fd8c0, transparent: true, opacity: 0.4, depthWrite: false, depthTest: false, blending: THREE.AdditiveBlending }));
+  brilhoBase.position.set(0, -0.45, 0.3);
+  brilhoBase.renderOrder = 2;
+  cena.add(brilhoBase);
 
   // o modelo vem comprimido (Draco + texturas WebP): o decodificador Draco vem da mesma versão do Three.js,
   // servido pelo próprio app (vendor/three), sem depender de CDN
@@ -116,7 +162,7 @@ export function criarRobo(container, { modelo, aoCarregar, aoProgresso, enquadre
         Object.assign(sh.uniforms, U);
         sh.vertexShader = sh.vertexShader
           .replace('#include <common>', `#include <common>
-            uniform mat3 uHead; uniform vec3 uPivot; uniform float uY0, uY1, uBreath; varying float vHeadW;`)
+            uniform mat3 uHead; uniform vec3 uPivot; uniform float uY0, uY1, uBreath; varying float vHeadW; varying float vMundoY;`)
           .replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>
             float hw = smoothstep(uY0, uY1, position.y);
             objectNormal = normalize(mix(objectNormal, uHead * objectNormal, hw));`)
@@ -128,16 +174,24 @@ export function criarRobo(container, { modelo, aoCarregar, aoProgresso, enquadre
             float cw = 1.0 - smoothstep(uY0 - 0.06, uY0, position.y);
             transformed.y += cw * uBreath * 0.006;
             transformed.z *= 1.0 + cw * uBreath * 0.006;
-            transformed.y += uBreath * 0.004;`);
+            transformed.y += uBreath * 0.004;`)
+          .replace('#include <project_vertex>', `#include <project_vertex>
+            vMundoY = (modelMatrix * vec4(transformed, 1.0)).y;`);
         sh.fragmentShader = sh.fragmentShader
           .replace('#include <common>', `#include <common>
-            uniform float uGlow; varying float vHeadW;`)
+            uniform float uGlow; varying float vHeadW; varying float vMundoY;
+            uniform sampler2D uBg; uniform vec2 uRes, uFade;`)
           .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
             vec3 cBase = diffuseColor.rgb;
             float mx = max(cBase.r, max(cBase.g, cBase.b)), mn = min(cBase.r, min(cBase.g, cBase.b));
             float sat = (mx - mn) / (mx + 1e-4);
             float glow = smoothstep(0.55, 0.8, sat) * smoothstep(0.18, 0.45, mx);
-            totalEmissiveRadiance += cBase * glow * uGlow * 1.3;`);
+            totalEmissiveRadiance += cBase * glow * uGlow * 1.3;`)
+          .replace('#include <opaque_fragment>', `#include <opaque_fragment>
+            // dissolve: a curva suave (ease) deixa o meio da transição mais longo que as pontas
+            float fundoW = 1.0 - smoothstep(uFade.x, uFade.y, vMundoY);
+            fundoW = fundoW * fundoW * (3.0 - 2.0 * fundoW);
+            gl_FragColor.rgb = mix(gl_FragColor.rgb, texture2D(uBg, gl_FragCoord.xy / uRes).rgb, fundoW);`);
       };
       m.needsUpdate = true;
     });
@@ -166,6 +220,20 @@ export function criarRobo(container, { modelo, aoCarregar, aoProgresso, enquadre
       cena.background = ehClaro ? ftClaro : ft;
       bloom.threshold = ehClaro ? 1.05 : 0.92;  // no claro o fundo chega perto de 1: só os LEDs (acima de 1) brilham
       halo.visible = !ehClaro;
+      U.uBg.value = ehClaro ? ftClaro : ft;
+      // no escuro as partículas somam luz (ciano-esverdeado); no claro, somar luz sobre branco não aparece,
+      // então elas viram pontos verde-água translúcidos e o brilho da base vira uma sombra de luz lima bem leve
+      pMat.blending = ehClaro ? THREE.NormalBlending : THREE.AdditiveBlending;
+      pMat.uniforms.uCor.value.set(ehClaro ? 0x1f9e86 : 0x7dffcf);
+      pMat.uniforms.uOpac.value = ehClaro ? 0.8 : 0.9;
+      pMat.fragmentShader = ehClaro
+        ? 'uniform vec3 uCor; uniform float uOpac; varying float vA; void main() { float d = length(gl_PointCoord - 0.5); float a = smoothstep(0.5, 0.0, d); a *= a * vA * uOpac; gl_FragColor = vec4(uCor, a); }'
+        : 'uniform vec3 uCor; uniform float uOpac; varying float vA; void main() { float d = length(gl_PointCoord - 0.5); float a = smoothstep(0.5, 0.0, d); a *= a * vA * uOpac; gl_FragColor = vec4(uCor * a, a); }';
+      pMat.needsUpdate = true;
+      brilhoBase.material.blending = ehClaro ? THREE.NormalBlending : THREE.AdditiveBlending;
+      brilhoBase.material.color.set(ehClaro ? 0xc3ff24 : 0x2fd8c0);
+      brilhoBase.material.opacity = ehClaro ? 0.22 : 0.4;
+      brilhoBase.material.needsUpdate = true;
       hemi.color.set(ehClaro ? 0xf2f8ff : 0xdfefff); hemi.groundColor.set(ehClaro ? 0x9fb8cc : 0x0a1830);
       hemi.intensity = ehClaro ? 0.7 : 0.55;
       cena.environmentIntensity = ehClaro ? 0.5 : 0.45;
@@ -180,6 +248,8 @@ export function criarRobo(container, { modelo, aoCarregar, aoProgresso, enquadre
     const w = container.clientWidth, h = container.clientHeight;
     renderer.setSize(w, h, false); composer.setSize(w, h); bloom.setSize(w, h);
     camera.aspect = w / h; camera.updateProjectionMatrix();
+    renderer.getDrawingBufferSize(U.uRes.value);
+    pMat.uniforms.uEsc.value = U.uRes.value.y;
   }
   new ResizeObserver(tamanho).observe(container); tamanho();
 
@@ -207,6 +277,16 @@ export function criarRobo(container, { modelo, aoCarregar, aoProgresso, enquadre
     ciano.intensity = 2.2 + falando * 1.5 + pulso * 2;
     halo.material.opacity = 0.75 + Math.sin(t * 2.0) * 0.12 + falando * 0.15 + pulso * 0.2;
     halo.scale.setScalar(1 + pulso * 0.04 + falando * Math.sin(t * 6) * 0.006);
+    // partículas: sobem, giram de leve com o corpo e renascem embaixo
+    for (let i = 0; i < NP; i++) {
+      pVida[i] += dt * pVel[i] * 2.2;
+      if (pVida[i] >= 1) sortear(i, false);
+      pPos[i * 3 + 1] += dt * pVel[i] * (0.6 + falando);
+      pPos[i * 3] += Math.sin(t * 0.9 + i) * dt * 0.01;
+    }
+    pGeo.attributes.position.needsUpdate = pGeo.attributes.aVida.needsUpdate = true;
+    particulas.rotation.y = grupo.rotation.y;
+    brilhoBase.material.opacity = (U.uBg.value === ftClaro ? 0.22 : 0.32) * (1 + Math.sin(t * 1.3) * 0.12 + pulso * 0.6 + falando * 0.2);
     composer.render(dt);
   });
   api.tema(claro);

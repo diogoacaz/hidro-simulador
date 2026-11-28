@@ -268,7 +268,7 @@
   // ---------- a robô ----------
   const carga = document.getElementById('carga');
   const robo = window.robo = criarRobo(document.getElementById('palco3d'), {
-    modelo: 'assets/models/robo.glb', grade: true, enquadre: { y: 0.3, dist: 3.8, alvoX: 0 },  // mais longe: o modelo ficou mais leve, e de perto perdia nitidez
+    modelo: 'assets/models/robo.glb', grade: true, enquadre: { y: 0.07, dist: 3.8, alvoX: 0 },  // centrada na tela; mais longe porque o modelo ficou mais leve e de perto perdia nitidez
     claro: document.documentElement.dataset.tema === 'claro',
     aoProgresso: (p) => carga.textContent = `CARREGANDO A ASSISTENTE… ${Math.round(p * 100)}%`,
     aoCarregar: () => { carga.style.opacity = 0; setTimeout(() => carga.remove(), 700); robo.pulsar(); },
